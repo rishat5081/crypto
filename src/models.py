@@ -63,6 +63,11 @@ class OpenTrade:
     opened_at_ms: int
     reason: str
     signal_confidence: float
+    original_stop_loss: Optional[float] = None
+
+    def __post_init__(self):
+        if self.original_stop_loss is None:
+            self.original_stop_loss = self.stop_loss
 
     def update_with_candle(
         self,
@@ -95,7 +100,7 @@ class OpenTrade:
                 exit_price = self.take_profit
                 result = "WIN"
 
-        risk_per_unit = abs(self.entry - self.stop_loss)
+        risk_per_unit = abs(self.entry - (self.original_stop_loss or self.stop_loss))
         pnl_per_unit = (
             exit_price - self.entry if self.side == "LONG" else self.entry - exit_price
         )
