@@ -1,0 +1,49 @@
+name: E2E Tests
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    name: Dashboard E2E
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start dashboard server
+        run: |
+          cd frontend && python server.py &
+          sleep 3
+
+      - name: Verify dashboard responds
+        run: |
+          curl -sf http://127.0.0.1:8787/ > /dev/null
+          curl -sf http://127.0.0.1:8787/api/state > /dev/null
+          echo "Dashboard endpoints OK"
+
+      - name: Verify analytics endpoint
+        run: |
+          curl -sf http://127.0.0.1:8787/api/analytics > /dev/null
+          echo "Analytics endpoint OK"
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-logs
+          path: data/*.jsonl
+          retention-days: 7

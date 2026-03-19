@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Crypto TP/SL Dashboard</title>
     <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   </head>
   <body>
     <div class="bg-orb bg-orb-a"></div>
@@ -16,10 +17,22 @@
           <header class="hero">
             <p class="kicker">LIVE SIGNAL MONITOR</p>
             <h1>TP / SL Control Panel</h1>
-            <p id="connection" class="meta">Connecting...</p>
+            <p class="meta connection-status">
+              <span id="live_dot" class="live-dot"></span>
+              <span id="connection">Connecting...</span>
+            </p>
           </header>
 
-          <section class="grid">
+          <nav class="section-nav" id="section_nav">
+            <button class="section-tab" data-target="sect-overview">Overview</button>
+            <button class="section-tab" data-target="sect-analytics">Analytics</button>
+            <button class="section-tab" data-target="sect-opportunities">Opportunities</button>
+            <button class="section-tab" data-target="sect-market">Market</button>
+            <button class="section-tab" data-target="sect-activity">Activity</button>
+            <button class="section-tab" data-target="sect-history">History</button>
+          </nav>
+
+          <section class="grid" id="sect-overview">
             <article class="card signal-card">
               <h2>Active Trade</h2>
               <div class="signal-main">
@@ -33,7 +46,10 @@
                 <div><span>Entry</span><strong id="entry">-</strong></div>
                 <div><span>Take Profit</span><strong id="tp">-</strong></div>
                 <div><span>Stop Loss</span><strong id="sl">-</strong></div>
+                <div><span>Risk / Reward</span><strong id="open_rr">-</strong></div>
+                <div><span>Win Prob</span><strong id="open_win_prob">-</strong></div>
                 <div><span>Confidence</span><strong id="confidence">-</strong></div>
+                <div><span>Expected (R)</span><strong id="open_ev">-</strong></div>
                 <div><span>Score</span><strong id="score">-</strong></div>
               </div>
             </article>
@@ -42,7 +58,9 @@
               <h2>Latest Result</h2>
               <div class="kv-grid">
                 <div><span>Symbol</span><strong id="last_symbol">-</strong></div>
+                <div><span>Side</span><strong id="last_side">-</strong></div>
                 <div><span>Result</span><strong id="last_result">-</strong></div>
+                <div><span>Timeframe</span><strong id="last_tf">-</strong></div>
                 <div><span>Exit Price</span><strong id="last_exit">-</strong></div>
                 <div><span>PnL (R)</span><strong id="last_pnl_r">-</strong></div>
                 <div><span>PnL (USD)</span><strong id="last_pnl_usd">-</strong></div>
@@ -58,34 +76,115 @@
                 <div><span>Wins</span><strong id="wins">-</strong></div>
                 <div><span>Losses</span><strong id="losses">-</strong></div>
                 <div><span>Win Rate</span><strong id="win_rate">-</strong></div>
+                <div><span>Profit Factor</span><strong id="perf_profit_factor">-</strong></div>
                 <div><span>Expectancy (R)</span><strong id="expectancy">-</strong></div>
                 <div><span>Active Symbols</span><strong id="active_symbols_count">-</strong></div>
                 <div><span>Blocked Symbols</span><strong id="blocked_symbols_count">-</strong></div>
+                <div aria-hidden="true"></div>
+                <div class="win-rate-bar-wrap"><div class="win-rate-bar" id="win_rate_bar"></div></div>
               </div>
             </article>
+          </section>
 
-            <article class="card">
-              <h2>Coin Control</h2>
-              <div class="control-grid">
-                <label for="coin_select">Trading Coin</label>
-                <select id="coin_select" class="input-select"></select>
-                <button id="save_coin_btn" class="btn-primary" type="button">Save Coin</button>
-                <label for="coin_search">Search Any Binance Pair</label>
-                <input id="coin_search" class="input-select" list="symbols_datalist" placeholder="Type BTCUSDT, ETHUSDT..." />
-                <datalist id="symbols_datalist"></datalist>
-                <button id="add_coin_btn" class="btn-primary" type="button">Add To Watchlist</button>
-                <button id="save_watchlist_btn" class="btn-primary" type="button">Save Watchlist</button>
-                <button id="refresh_trade_btn" class="btn-primary" type="button">Refresh Trade</button>
-                <div class="chips-wrap" id="watchlist_chips"></div>
-                <p id="coin_status" class="control-hint">Select a coin and save. It applies on the next scan cycle.</p>
+          <article class="card full-width analytics-section collapsible-section" id="sect-analytics">
+            <div class="card-head">
+              <h2>Analytics Dashboard</h2>
+              <button class="collapse-btn" title="Toggle section">▾</button>
+            </div>
+            <div class="collapse-body">
+              <div class="analytics-summary">
+                <div class="stat-card">
+                  <span>Total Trades</span>
+                  <strong id="analytics_total_trades">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>Win Rate</span>
+                  <strong id="analytics_win_rate">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>Profit Factor</span>
+                  <strong id="analytics_profit_factor">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>Expectancy (R)</span>
+                  <strong id="analytics_expectancy">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>Total PnL (USD)</span>
+                  <strong id="analytics_total_pnl">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>Max Drawdown</span>
+                  <strong id="analytics_max_dd">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>Best Streak</span>
+                  <strong id="analytics_best_streak">-</strong>
+                </div>
+                <div class="stat-card">
+                  <span>Worst Streak</span>
+                  <strong id="analytics_worst_streak">-</strong>
+                </div>
               </div>
-            </article>
+              <div class="charts-grid">
+                <div class="chart-container">
+                  <h3>Equity Curve</h3>
+                  <canvas id="equity_chart"></canvas>
+                </div>
+                <div class="chart-container">
+                  <h3>Rolling Win Rate</h3>
+                  <canvas id="winrate_chart"></canvas>
+                </div>
+                <div class="chart-container">
+                  <h3>PnL Distribution</h3>
+                  <canvas id="pnl_dist_chart"></canvas>
+                </div>
+                <div class="chart-container">
+                  <h3>Drawdown</h3>
+                  <canvas id="drawdown_chart"></canvas>
+                </div>
+              </div>
+            </div>
+          </article>
 
-            <article class="card full-width">
-              <div class="card-head">
-                <h2>Possible Trades (Multi-Coin)</h2>
+          <article class="card full-width collapsible-section">
+            <div class="card-head">
+              <h2>Symbol Performance</h2>
+              <button class="collapse-btn" title="Toggle section">▾</button>
+            </div>
+            <div class="collapse-body">
+              <div class="symbol-grid" id="symbol_performance_grid">
+                <p class="meta-inline">Waiting for analytics data...</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="card">
+            <h2>Coin Control</h2>
+            <div class="control-grid">
+              <label for="coin_select">Trading Coin</label>
+              <select id="coin_select" class="input-select"></select>
+              <button id="save_coin_btn" class="btn-primary" type="button">Save Coin</button>
+              <label for="coin_search">Search Any Binance Pair</label>
+              <input id="coin_search" class="input-select" list="symbols_datalist" placeholder="Type BTCUSDT, ETHUSDT..." />
+              <datalist id="symbols_datalist"></datalist>
+              <button id="add_coin_btn" class="btn-primary" type="button">Add To Watchlist</button>
+              <button id="save_watchlist_btn" class="btn-primary" type="button">Save Watchlist</button>
+              <button id="refresh_trade_btn" class="btn-primary" type="button">Refresh Trade</button>
+              <div class="chips-wrap" id="watchlist_chips"></div>
+              <p id="coin_status" class="control-hint">Select a coin and save. It applies on the next scan cycle.</p>
+            </div>
+          </article>
+
+          <article class="card full-width collapsible-section" id="sect-opportunities">
+            <div class="card-head">
+              <h2>Possible Trades (Multi-Coin)</h2>
+              <div class="card-head-right">
                 <p id="possible_meta" class="meta-inline">Waiting for candidates...</p>
+                <button class="collapse-btn" title="Toggle section">▾</button>
               </div>
+            </div>
+            <div class="collapse-body">
               <div class="opportunity-controls">
                 <label for="opportunity_bucket_filter">Probability Bucket</label>
                 <select id="opportunity_bucket_filter" class="input-select">
@@ -128,10 +227,15 @@
                   </tbody>
                 </table>
               </div>
-            </article>
+            </div>
+          </article>
 
-            <article class="card full-width">
+          <article class="card full-width collapsible-section" id="sect-market">
+            <div class="card-head">
               <h2>Live Market Snapshot</h2>
+              <button class="collapse-btn" title="Toggle section">▾</button>
+            </div>
+            <div class="collapse-body">
               <div class="table-wrap system-log-table-wrap">
                 <table>
                   <thead>
@@ -146,13 +250,18 @@
                   </tbody>
                 </table>
               </div>
-            </article>
+            </div>
+          </article>
 
-            <article class="card full-width">
-              <div class="card-head">
-                <h2>System Activity (Visual Logs)</h2>
+          <article class="card full-width collapsible-section" id="sect-activity">
+            <div class="card-head">
+              <h2>System Activity (Visual Logs)</h2>
+              <div class="card-head-right">
                 <button id="refresh_logs_btn" class="btn-primary" type="button">Refresh Logs</button>
+                <button class="collapse-btn" title="Toggle section">▾</button>
               </div>
+            </div>
+            <div class="collapse-body">
               <p id="coin_activity_meta" class="meta-inline">Waiting for coin activity...</p>
               <div class="table-wrap">
                 <table>
@@ -187,13 +296,18 @@
                   </tbody>
                 </table>
               </div>
-            </article>
+            </div>
+          </article>
 
-            <article class="card full-width">
-              <div class="card-head">
-                <h2>History Tab (Stored Trades)</h2>
+          <article class="card full-width collapsible-section" id="sect-history">
+            <div class="card-head">
+              <h2>History Tab (Stored Trades)</h2>
+              <div class="card-head-right">
                 <p id="history_meta" class="meta-inline">Loading trade history...</p>
+                <button class="collapse-btn" title="Toggle section">▾</button>
               </div>
+            </div>
+            <div class="collapse-body">
               <div class="table-wrap">
                 <table>
                   <thead>
@@ -216,35 +330,45 @@
                   </tbody>
                 </table>
               </div>
-            </article>
-          </section>
+            </div>
+          </article>
         </section>
 
         <aside class="news-pane">
-          <article class="card news-card">
+          <article class="card news-card collapsible-section">
             <div class="card-head">
               <h2>Market News Radar</h2>
-              <button id="refresh_news_btn" class="btn-primary" type="button">Refresh</button>
+              <div class="card-head-right">
+                <button id="refresh_news_btn" class="btn-primary" type="button">Refresh</button>
+                <button class="collapse-btn" title="Toggle">▾</button>
+              </div>
             </div>
-            <div class="news-tools">
-              <input id="news_search" class="input-select" type="text" placeholder="Filter headlines..." />
-              <select id="news_source" class="input-select">
-                <option value="ALL">All Sources</option>
-              </select>
-            </div>
-            <p id="news_updated" class="meta">Loading news...</p>
-            <p id="news_status" class="control-hint"></p>
-            <div class="news-list-wrap">
-              <ul id="news_list" class="news-list">
-                <li class="news-item">Waiting for latest headlines...</li>
-              </ul>
+            <div class="collapse-body">
+              <div class="news-tools">
+                <input id="news_search" class="input-select" type="text" placeholder="Filter headlines..." />
+                <select id="news_source" class="input-select">
+                  <option value="ALL">All Sources</option>
+                </select>
+              </div>
+              <p id="news_updated" class="meta">Loading news...</p>
+              <p id="news_status" class="control-hint"></p>
+              <div class="news-list-wrap">
+                <ul id="news_list" class="news-list">
+                  <li class="news-item">Waiting for latest headlines...</li>
+                </ul>
+              </div>
             </div>
           </article>
 
-          <article class="card guard-card">
-            <h2>Guard Monitor</h2>
-            <p id="guard_event_type" class="meta">No guard events yet.</p>
-            <p id="guard_event_detail" class="control-hint">Rolling symbol health and adaptive retuning status will appear here.</p>
+          <article class="card guard-card collapsible-section">
+            <div class="card-head">
+              <h2>Guard Monitor</h2>
+              <button class="collapse-btn" title="Toggle">▾</button>
+            </div>
+            <div class="collapse-body">
+              <p id="guard_event_type" class="meta">No guard events yet.</p>
+              <p id="guard_event_detail" class="control-hint">Rolling symbol health and adaptive retuning status will appear here.</p>
+            </div>
           </article>
         </aside>
       </div>

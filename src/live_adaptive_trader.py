@@ -96,8 +96,11 @@ class LiveAdaptivePaperTrader:
         self.trail_trigger_r = float(live_cfg.get("trail_trigger_r", 0.2))
         self.trail_keep_pct = float(live_cfg.get("trail_keep_pct", 0.7))
         self.max_adverse_r_cut = float(live_cfg.get("max_adverse_r_cut", 0.9))
-        self.max_stagnation_bars = int(live_cfg.get("max_stagnation_bars", 8))
-        self.min_progress_r_for_stagnation = float(live_cfg.get("min_progress_r_for_stagnation", 0.15))
+        self.max_wait_candles = int(live_cfg.get("max_wait_candles", 12))
+        self.max_stagnation_bars = int(live_cfg.get("max_stagnation_bars", 6))
+        self.min_progress_r_for_stagnation = float(live_cfg.get("min_progress_r_for_stagnation", 0.10))
+        self.momentum_reversal_bars = int(live_cfg.get("momentum_reversal_bars", 3))
+        self.momentum_reversal_r = float(live_cfg.get("momentum_reversal_r", -0.4))
         guard_cfg = live_cfg.get("performance_guard", {})
         self.guard_enabled = bool(guard_cfg.get("enabled", True))
         self.guard_symbol_window = int(guard_cfg.get("rolling_window_trades", 12))
@@ -497,20 +500,29 @@ class LiveAdaptivePaperTrader:
         return max(low, min(high, value))
 
     def _estimate_win_probability(self, candidate: CandidateSignal) -> float:
-        # Lightweight calibrated probability estimate from confidence + setup quality signals.
+        # Historical-calibrated estimator: blend 60% setup quality + 40% actual symbol win rate.
         conf_component = self._clamp(candidate.signal.confidence - 0.03, 0.0, 1.0)
         rr_component = self._clamp(candidate.rr / 1.8, 0.0, 1.0)
         exp_component = self._clamp((candidate.expectancy_r + 0.25) / 0.85, 0.0, 1.0)
         trend_component = self._clamp(candidate.trend_strength / 0.01, 0.0, 1.0)
         quality_component = self._clamp(candidate.symbol_quality, 0.0, 1.0)
-        weighted = (
-            (conf_component * 0.48)
-            + (exp_component * 0.24)
-            + (trend_component * 0.12)
-            + (quality_component * 0.10)
-            + (rr_component * 0.06)
+        setup_quality = (
+            (conf_component * 0.40)
+            + (exp_component * 0.25)
+            + (trend_component * 0.15)
+            + (quality_component * 0.12)
+            + (rr_component * 0.08)
         )
-        calibrated = (weighted * 0.92) + 0.02
+        # Actual symbol win rate from recent trades (default 0.5 if no history)
+        symbol = candidate.signal.symbol
+        symbol_trades = self.symbol_recent_trades.get(symbol, [])
+        if len(symbol_trades) >= 3:
+            symbol_wins = sum(1 for t in symbol_trades if t.result == "WIN")
+            actual_win_rate = symbol_wins / len(symbol_trades)
+        else:
+            actual_win_rate = 0.5
+        blended = (setup_quality * 0.60) + (actual_win_rate * 0.40)
+        calibrated = (blended * 0.92) + 0.02
         return self._clamp(calibrated, 0.01, 0.99)
 
     @staticmethod
@@ -558,22 +570,70 @@ class LiveAdaptivePaperTrader:
 
         start = time.time()
         timeframe_minutes = self._timeframe_minutes(signal.timeframe)
-        effective_wait_minutes = max(self.max_wait_minutes_per_trade, timeframe_minutes)
+        # Use candle-based timeout: max_wait_candles * timeframe, capped by max_wait_minutes
+        candle_based_wait = self.max_wait_candles * timeframe_minutes
+        effective_wait_minutes = min(self.max_wait_minutes_per_trade, max(candle_based_wait, timeframe_minutes * 2))
         max_wait_seconds = effective_wait_minutes * 60
         last_seen_close_ms = signal.signal_time_ms
         best_r = 0.0
         original_risk = max(abs(signal.entry - signal.stop_loss), 1e-9)
         bars_seen = 0
+        consecutive_adverse_bars = 0
         moved_to_break_even = False
         trailing_stop_active = False
+        consecutive_fetch_errors = 0
+        last_known_candles = None
 
         def current_r_multiple(side: str, entry: float, stop_loss: float, price: float) -> float:
             risk = max(abs(entry - stop_loss), 1e-9)
             pnl_per_unit = price - entry if side == "LONG" else entry - price
             return pnl_per_unit / risk
 
+        def _make_exit(active, latest, reason_prefix):
+            pnl_per_unit = latest.close - active.entry if active.side == "LONG" else active.entry - latest.close
+            gross_r = pnl_per_unit / original_risk
+            cost_r = self.cost_model.trade_cost_r(active.entry, signal.stop_loss)
+            net_r = gross_r - cost_r
+            return ClosedTrade(
+                symbol=active.symbol,
+                timeframe=active.timeframe,
+                side=active.side,
+                entry=active.entry,
+                take_profit=active.take_profit,
+                stop_loss=active.stop_loss,
+                exit_price=latest.close,
+                result="WIN" if net_r > 0 else "LOSS",
+                opened_at_ms=active.opened_at_ms,
+                closed_at_ms=latest.close_time_ms,
+                pnl_r=net_r,
+                pnl_usd=net_r * self.risk_usd,
+                reason=f"{reason_prefix} | {active.reason}",
+            )
+
         while True:
-            candles = self.client.fetch_klines(symbol=signal.symbol, interval=signal.timeframe, limit=10)
+            # Network error protection: wrap klines fetch in try/except
+            try:
+                candles = self.client.fetch_klines(symbol=signal.symbol, interval=signal.timeframe, limit=10)
+                last_known_candles = candles
+                consecutive_fetch_errors = 0
+            except Exception as exc:
+                consecutive_fetch_errors += 1
+                print(json.dumps({
+                    "type": "TRADE_MONITOR_FETCH_ERROR",
+                    "time": self._now_iso(),
+                    "symbol": signal.symbol,
+                    "error": str(exc),
+                    "consecutive_errors": consecutive_fetch_errors,
+                }))
+                # After 5 consecutive failures, force-close at last known price
+                if consecutive_fetch_errors >= 5 and last_known_candles:
+                    active = engine.active_trade
+                    if active:
+                        latest = last_known_candles[-1]
+                        return _make_exit(active, latest, "NETWORK_ERROR_EXIT")
+                time.sleep(self.poll_seconds)
+                continue
+
             closed_candles = [c for c in candles if c.close_time_ms < int(time.time() * 1000)]
             if closed_candles:
                 latest = closed_candles[-1]
@@ -589,6 +649,12 @@ class LiveAdaptivePaperTrader:
                     favorable_price = latest.high if active.side == "LONG" else latest.low
                     peak_r = current_r_multiple(active.side, active.entry, signal.stop_loss, favorable_price)
                     best_r = max(best_r, peak_r)
+
+                    # Track consecutive adverse bars for momentum reversal exit
+                    if now_r < 0:
+                        consecutive_adverse_bars += 1
+                    else:
+                        consecutive_adverse_bars = 0
 
                     # Check TP/SL FIRST with original stop-loss, before any mutation
                     closed = engine.on_candle(latest)
@@ -674,47 +740,31 @@ class LiveAdaptivePaperTrader:
                     worst_price = latest.low if active.side == "LONG" else latest.high
                     adverse_r = current_r_multiple(active.side, active.entry, signal.stop_loss, worst_price)
                     if adverse_r <= (-1.0 * self.max_adverse_r_cut):
-                        pnl_per_unit = latest.close - active.entry if active.side == "LONG" else active.entry - latest.close
-                        gross_r = pnl_per_unit / original_risk
-                        cost_r = self.cost_model.trade_cost_r(active.entry, signal.stop_loss)
-                        net_r = gross_r - cost_r
-                        return ClosedTrade(
-                            symbol=active.symbol,
-                            timeframe=active.timeframe,
-                            side=active.side,
-                            entry=active.entry,
-                            take_profit=active.take_profit,
-                            stop_loss=active.stop_loss,
-                            exit_price=latest.close,
-                            result="WIN" if net_r > 0 else "LOSS",
-                            opened_at_ms=active.opened_at_ms,
-                            closed_at_ms=latest.close_time_ms,
-                            pnl_r=net_r,
-                            pnl_usd=net_r * self.risk_usd,
-                            reason=f"ADVERSE_CUT | {active.reason}",
-                        )
+                        return _make_exit(active, latest, "ADVERSE_CUT")
 
+                    # Momentum reversal exit: if price goes against for N consecutive bars past threshold
+                    if (consecutive_adverse_bars >= self.momentum_reversal_bars
+                            and now_r <= self.momentum_reversal_r):
+                        print(json.dumps({
+                            "type": "RISK_MANAGER_UPDATE",
+                            "time": self._now_iso(),
+                            "symbol": active.symbol,
+                            "timeframe": active.timeframe,
+                            "action": "MOMENTUM_REVERSAL_EXIT",
+                            "now_r": round(now_r, 4),
+                            "consecutive_adverse_bars": consecutive_adverse_bars,
+                        }))
+                        return _make_exit(active, latest, "MOMENTUM_REVERSAL")
+
+                    # Stagnation exit: no progress after N bars
                     if bars_seen >= self.max_stagnation_bars and best_r < self.min_progress_r_for_stagnation:
-                        pnl_per_unit = latest.close - active.entry if active.side == "LONG" else active.entry - latest.close
-                        gross_r = pnl_per_unit / original_risk
-                        cost_r = self.cost_model.trade_cost_r(active.entry, signal.stop_loss)
-                        net_r = gross_r - cost_r
-                        return ClosedTrade(
-                            symbol=active.symbol,
-                            timeframe=active.timeframe,
-                            side=active.side,
-                            entry=active.entry,
-                            take_profit=active.take_profit,
-                            stop_loss=active.stop_loss,
-                            exit_price=latest.close,
-                            result="WIN" if net_r > 0 else "LOSS",
-                            opened_at_ms=active.opened_at_ms,
-                            closed_at_ms=latest.close_time_ms,
-                            pnl_r=net_r,
-                            pnl_usd=net_r * self.risk_usd,
-                            reason=f"STAGNATION_EXIT | {active.reason}",
-                        )
+                        return _make_exit(active, latest, "STAGNATION_EXIT")
 
+                    # Candle-count based timeout
+                    if bars_seen >= self.max_wait_candles:
+                        return _make_exit(active, latest, "CANDLE_TIMEOUT")
+
+            # Hard time-based safety timeout (fallback)
             if time.time() - start >= max_wait_seconds:
                 now_ms = int(time.time() * 1000)
                 completed = [c for c in candles if c.close_time_ms < now_ms]
@@ -722,27 +772,7 @@ class LiveAdaptivePaperTrader:
                 active = engine.active_trade
                 if active is None:
                     raise RuntimeError("Active trade missing during timeout close")
-
-                exit_price = latest.close
-                pnl_per_unit = exit_price - active.entry if active.side == "LONG" else active.entry - exit_price
-                gross_r = pnl_per_unit / original_risk
-                cost_r = self.cost_model.trade_cost_r(active.entry, signal.stop_loss)
-                net_r = gross_r - cost_r
-                return ClosedTrade(
-                    symbol=active.symbol,
-                    timeframe=active.timeframe,
-                    side=active.side,
-                    entry=active.entry,
-                    take_profit=active.take_profit,
-                    stop_loss=active.stop_loss,
-                    exit_price=exit_price,
-                    result="WIN" if net_r > 0 else "LOSS",
-                    opened_at_ms=active.opened_at_ms,
-                    closed_at_ms=latest.close_time_ms,
-                    pnl_r=net_r,
-                    pnl_usd=net_r * self.risk_usd,
-                    reason=f"TIMEOUT_EXIT | {active.reason}",
-                )
+                return _make_exit(active, latest, "TIMEOUT_EXIT")
 
             time.sleep(self.poll_seconds)
 
@@ -751,18 +781,18 @@ class LiveAdaptivePaperTrader:
         current = self.symbol_confidence.get(symbol, float(self.strategy_payload["min_confidence"]))
 
         if trade.result == "LOSS":
-            self.symbol_confidence[symbol] = min(0.97, current + 0.03)
-            self.min_trend_strength = min(0.004, self.min_trend_strength + 0.00003)
-            self.min_rr_floor = min(0.8, self.min_rr_floor + 0.005)
-            self.execute_min_confidence = min(0.97, self.execute_min_confidence + 0.003)
-            self.execute_min_expectancy_r = min(0.9, self.execute_min_expectancy_r + 0.008)
-            self.execute_min_score = min(0.95, self.execute_min_score + 0.003)
+            self.symbol_confidence[symbol] = min(0.93, current + 0.015)
+            self.min_trend_strength = min(0.003, self.min_trend_strength + 0.000015)
+            self.min_rr_floor = min(0.75, self.min_rr_floor + 0.0025)
+            self.execute_min_confidence = min(0.92, self.execute_min_confidence + 0.0015)
+            self.execute_min_expectancy_r = min(0.5, self.execute_min_expectancy_r + 0.003)
+            self.execute_min_score = min(0.85, self.execute_min_score + 0.0015)
         else:
             self.symbol_confidence[symbol] = max(0.50, current - 0.015)
             self.min_trend_strength = max(0.0004, self.min_trend_strength - 0.00003)
-            self.execute_min_confidence = max(0.80, self.execute_min_confidence - 0.004)
-            self.execute_min_expectancy_r = max(0.08, self.execute_min_expectancy_r - 0.01)
-            self.execute_min_score = max(0.60, self.execute_min_score - 0.004)
+            self.execute_min_confidence = max(0.58, self.execute_min_confidence - 0.004)
+            self.execute_min_expectancy_r = max(0.03, self.execute_min_expectancy_r - 0.01)
+            self.execute_min_score = max(0.50, self.execute_min_score - 0.004)
 
     def _apply_loss_guard(self, trade: ClosedTrade, cycle: int) -> None:
         if not self.loss_guard_enabled:
@@ -807,12 +837,12 @@ class LiveAdaptivePaperTrader:
                 "execute_min_score": self.execute_min_score,
             }
             self.global_pause_cycles_left = max(self.global_pause_cycles_left, self.global_pause_cycles)
-            self.min_candidate_confidence = min(0.96, self.min_candidate_confidence + 0.01)
-            self.min_rr_floor = min(0.9, self.min_rr_floor + 0.02)
-            self.min_trend_strength = min(0.005, self.min_trend_strength + 0.00005)
-            self.execute_min_confidence = min(0.98, self.execute_min_confidence + 0.01)
-            self.execute_min_expectancy_r = min(1.0, self.execute_min_expectancy_r + 0.05)
-            self.execute_min_score = min(0.98, self.execute_min_score + 0.02)
+            self.min_candidate_confidence = min(0.90, self.min_candidate_confidence + 0.005)
+            self.min_rr_floor = min(0.8, self.min_rr_floor + 0.01)
+            self.min_trend_strength = min(0.004, self.min_trend_strength + 0.000025)
+            self.execute_min_confidence = min(0.92, self.execute_min_confidence + 0.005)
+            self.execute_min_expectancy_r = min(0.5, self.execute_min_expectancy_r + 0.025)
+            self.execute_min_score = min(0.88, self.execute_min_score + 0.01)
             print(
                 json.dumps(
                     {

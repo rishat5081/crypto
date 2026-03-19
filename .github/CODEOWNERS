@@ -1,0 +1,9 @@
+# Global code ownership
+* @rishat5081
+
+# Core trading logic requires review
+/src/ @rishat5081
+/config.json @rishat5081
+
+# CI/CD changes require review
+/.github/ @rishat5081

@@ -107,6 +107,10 @@ class OpenTrade:
         pnl_r = pnl_per_unit / risk_per_unit if risk_per_unit > 0 else 0.0
         pnl_usd = pnl_r * risk_usd
 
+        # When trailing stop moved SL into profit, hitting SL is actually a WIN
+        if pnl_r > 0:
+            result = "WIN"
+
         return ClosedTrade(
             symbol=self.symbol,
             timeframe=self.timeframe,

@@ -148,8 +148,17 @@ h1 {
   box-shadow:
     0 20px 55px rgba(3, 8, 18, 0.45),
     inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  backdrop-filter: blur(8px);
+  backdrop-filter: blur(12px);
   animation: riseIn 340ms ease both;
+  transition: box-shadow 200ms ease, transform 200ms ease;
+}
+
+.card:not(.full-width):hover {
+  box-shadow:
+    0 24px 60px rgba(3, 8, 18, 0.55),
+    0 0 0 1px rgba(66, 210, 255, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  transform: translateY(-1px);
 }
 
 .card h2 {
@@ -606,6 +615,148 @@ tbody tr:hover {
   background: linear-gradient(165deg, rgba(20, 31, 48, 0.9) 0%, rgba(15, 24, 39, 0.95) 100%);
 }
 
+.analytics-section {
+  overflow: visible;
+}
+
+.analytics-summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.stat-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(7, 13, 22, 0.75);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: border-color 200ms ease, background 200ms ease;
+}
+
+.stat-card:hover {
+  border-color: rgba(112, 145, 194, 0.4);
+  background: rgba(10, 18, 30, 0.85);
+}
+
+.stat-card span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.stat-card strong {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 20px;
+  font-weight: 700;
+  color: #d7ecff;
+}
+
+.stat-card strong.positive {
+  color: var(--buy);
+}
+
+.stat-card strong.negative {
+  color: var(--sell);
+}
+
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.chart-container {
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  padding: 14px;
+  background: rgba(6, 11, 19, 0.55);
+  min-height: 260px;
+}
+
+.chart-container h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  color: #c2d6ed;
+  text-transform: uppercase;
+}
+
+.chart-container canvas {
+  width: 100% !important;
+  max-height: 240px;
+}
+
+.symbol-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 10px;
+}
+
+.symbol-card {
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  padding: 12px 14px;
+  background: rgba(7, 13, 22, 0.75);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.symbol-card.profitable {
+  border-color: rgba(31, 200, 128, 0.35);
+  background: rgba(15, 60, 40, 0.3);
+}
+
+.symbol-card.losing {
+  border-color: rgba(255, 110, 99, 0.35);
+  background: rgba(60, 15, 15, 0.3);
+}
+
+.symbol-card .symbol-name {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.symbol-card .symbol-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 8px;
+}
+
+.symbol-card .symbol-stats span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.symbol-card .symbol-stats strong {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  color: #d7ecff;
+}
+
+@media (max-width: 980px) {
+  .analytics-summary {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .charts-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 760px) {
+  .analytics-summary {
+    grid-template-columns: 1fr;
+  }
+}
+
 @keyframes riseIn {
   from {
     opacity: 0;
@@ -656,5 +807,215 @@ tbody tr:hover {
 
   table {
     min-width: 560px;
+  }
+}
+
+/* ============================================================
+   SECTION NAVIGATION
+   ============================================================ */
+
+.section-nav {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 5px 6px;
+  background: rgba(10, 18, 30, 0.75);
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  backdrop-filter: blur(10px);
+  position: sticky;
+  top: 8px;
+  z-index: 10;
+}
+
+.section-tab {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.section-tab:hover {
+  color: var(--text);
+  background: rgba(66, 210, 255, 0.07);
+  border-color: var(--line-soft);
+}
+
+.section-tab.active {
+  color: var(--accent);
+  background: rgba(66, 210, 255, 0.11);
+  border-color: rgba(66, 210, 255, 0.32);
+}
+
+/* ============================================================
+   LIVE CONNECTION DOT
+   ============================================================ */
+
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(112, 145, 194, 0.4);
+  flex-shrink: 0;
+  transition: background 400ms ease, box-shadow 400ms ease;
+}
+
+.live-dot.live {
+  background: var(--buy);
+  box-shadow: 0 0 0 3px rgba(31, 200, 128, 0.2);
+  animation: pulse-dot 2.5s ease infinite;
+}
+
+.live-dot.error {
+  background: var(--sell);
+  box-shadow: 0 0 0 3px rgba(255, 110, 99, 0.2);
+}
+
+@keyframes pulse-dot {
+  0%, 100% { box-shadow: 0 0 0 3px rgba(31, 200, 128, 0.2); }
+  50%       { box-shadow: 0 0 0 8px rgba(31, 200, 128, 0); }
+}
+
+/* ============================================================
+   COLLAPSIBLE SECTIONS
+   ============================================================ */
+
+.card-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-head-right .meta-inline {
+  margin: 0;
+}
+
+.collapse-btn {
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  padding: 3px 9px;
+  background: rgba(10, 18, 30, 0.6);
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 150ms ease;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+
+.collapse-btn:hover {
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.collapse-body {
+  overflow: hidden;
+  max-height: 9000px;
+  transition: max-height 420ms ease, opacity 300ms ease;
+  opacity: 1;
+}
+
+.collapsible-section.collapsed .collapse-body {
+  max-height: 0;
+  opacity: 0;
+}
+
+/* ============================================================
+   WIN RATE BAR
+   ============================================================ */
+
+.win-rate-bar-wrap {
+  grid-column: 1 / -1;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(112, 145, 194, 0.14);
+  overflow: hidden;
+  margin-top: 6px;
+}
+
+.win-rate-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1fc881 0%, #42d2ff 100%);
+  transition: width 700ms ease;
+  min-width: 2px;
+  width: 0%;
+}
+
+/* ============================================================
+   RESULT PILLS & ROW COLORS (HISTORY TABLE)
+   ============================================================ */
+
+.result-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid var(--line-soft);
+  color: var(--muted);
+  background: rgba(20, 30, 45, 0.5);
+}
+
+.result-win {
+  color: #c8ffe4;
+  border-color: rgba(53, 220, 148, 0.45);
+  background: rgba(21, 93, 64, 0.4);
+}
+
+.result-loss {
+  color: #ffc5bf;
+  border-color: rgba(255, 105, 96, 0.55);
+  background: rgba(96, 22, 25, 0.38);
+}
+
+tr.row-win td {
+  background: rgba(31, 200, 128, 0.04);
+}
+
+tr.row-loss td {
+  background: rgba(255, 110, 99, 0.04);
+}
+
+/* ============================================================
+   MOBILE ADDITIONS
+   ============================================================ */
+
+@media (max-width: 600px) {
+  .section-nav {
+    position: static;
+    gap: 3px;
+  }
+
+  .section-tab {
+    padding: 5px 10px;
+    font-size: 11px;
+  }
+
+  .card-head-right {
+    gap: 5px;
+  }
+
+  .category-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .analytics-summary {
+    grid-template-columns: 1fr 1fr;
   }
 }

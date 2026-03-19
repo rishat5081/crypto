@@ -1,167 +1,232 @@
-# Crypto Futures Data-Only Signal System
+<p align="center">
+  <h1 align="center">Crypto TP/SL Trading System</h1>
+  <p align="center">
+    Real-time cryptocurrency signal engine with adaptive TP/SL management, live dashboard, and analytics
+  </p>
+</p>
 
-This folder contains a complete data-only crypto futures scanner with:
+<p align="center">
+  <a href="https://github.com/rishat5081/crypto/actions/workflows/ci.yml"><img src="https://github.com/rishat5081/crypto/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/rishat5081/crypto/actions/workflows/code-quality.yml"><img src="https://github.com/rishat5081/crypto/actions/workflows/code-quality.yml/badge.svg" alt="Code Quality"></a>
+  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
+</p>
 
-- public REST market data pulling (no order placement)
-- signal generation (LONG/SHORT)
-- entry, take-profit, and stop-loss output
-- audible alert when a new trade signal is opened
-- one-active-trade-at-a-time lifecycle tracking
-- adaptive tuning based on closed-trade outcomes
-- live frontend dashboard for TP/SL monitoring
-- large multi-coin possible trade pool (up to 1000+) with probability buckets
-- right-side market news panel (auto-refresh + manual refresh)
-- searchable Binance futures symbol catalog with multi-coin runtime watchlist updates (no restart)
-- persistent History tab that stores closed trades from `data/live_events_history.jsonl`
-- visual runtime logs panel showing per-coin activity + recent system events
-- MongoDB-backed storage for runtime events, trades, runtime controls, and config snapshots
+---
 
-## One Command Setup + Run
+## Overview
 
-```bash
-cd /Users/user/Desktop/Work/crypto && ./run_all.sh
+A data-only crypto futures signal system that monitors Binance Futures markets in real-time, generates LONG/SHORT signals using technical analysis, and tracks paper trade performance with adaptive strategy tuning. No real orders are placed.
+
+### Key Features
+
+- **Multi-Strategy Signal Engine** - EMA crossover, pullback entry, and trend momentum signals
+- **Adaptive Feedback Loop** - Strategy parameters auto-adjust after each trade result
+- **Live Dashboard** - Real-time monitoring with Chart.js analytics, trade history, and market news
+- **Risk Management** - Trailing stops, break-even stops, momentum reversal exits, and stagnation detection
+- **Multi-Coin Scanning** - Simultaneous monitoring of 10+ symbols across multiple timeframes
+- **Loss Guard System** - Automatic cooldowns after consecutive losses with threshold tightening
+- **Performance Analytics** - Equity curve, drawdown, win rate, PnL distribution, and per-symbol breakdown
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────┐
+│                   Live Dashboard                     │
+│         (HTML/CSS/JS + Chart.js)                     │
+│  Overview | Analytics | Opportunities | Market       │
+│  Activity | History | News | Guard Monitor           │
+└─────────────┬───────────────────────────┬───────────┘
+              │ HTTP API                  │ WebSocket
+┌─────────────▼───────────────────────────▼───────────┐
+│              Dashboard Server (server.py)             │
+│  /api/state | /api/analytics | /api/history          │
+│  /api/news  | /api/symbols   | /api/config           │
+└─────────────┬───────────────────────────────────────┘
+              │ JSON Lines
+┌─────────────▼───────────────────────────────────────┐
+│          Live Adaptive Trader                        │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │ Strategy │  │  Trade   │  │  Risk Manager    │   │
+│  │  Engine  │→ │  Engine  │→ │  (Trail/BE/Cut)  │   │
+│  └──────────┘  └──────────┘  └──────────────────┘   │
+│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
+│  │ Feedback │  │  Loss    │  │  Performance     │   │
+│  │  System  │  │  Guard   │  │  Guard           │   │
+│  └──────────┘  └──────────┘  └──────────────────┘   │
+└─────────────┬───────────────────────────────────────┘
+              │ REST API
+┌─────────────▼───────────────────────────────────────┐
+│         Binance Futures (Public Data Only)            │
+│  /fapi/v1/klines | /fapi/v1/premiumIndex             │
+│  /fapi/v1/ticker/price                               │
+└─────────────────────────────────────────────────────┘
 ```
 
-Prerequisite: a reachable MongoDB server (local or remote), e.g. local `mongod` on `127.0.0.1:27017`.
+## Tech Stack
 
-That single command will:
+| Component | Technology |
+|-----------|-----------|
+| **Backend** | Python 3.11+ |
+| **Signal Engine** | Custom EMA/RSI/ATR strategy with adaptive tuning |
+| **Data Source** | Binance Futures REST API (public endpoints) |
+| **Dashboard** | Vanilla HTML/CSS/JS with Chart.js |
+| **API Server** | Python http.server |
+| **Storage** | JSON Lines (file-based) + MongoDB (optional) |
+| **ML Pipeline** | Walk-forward optimizer with logistic classifier |
+| **Deployment** | systemd service with Docker MongoDB |
 
-- detect your OS
-- install Python (if missing) using available package manager
-- create `.venv` and install Python packages
-- start frontend dashboard at `http://127.0.0.1:8787`
-- connect to MongoDB and auto-create database `crypto_trading_live` on first writes
-- pull latest live market data
-- optimize and apply the best strategy from recent data
-- retune live thresholds from longer multi-coin trade history
-- start the live adaptive loop (find signal, wait for closure, verify result, retune, repeat)
+## Quick Start
 
-## Frontend Folder
-
-- `frontend/index.html`: dashboard UI
-- `frontend/styles.css`: dashboard styling
-- `frontend/app.js`: live data polling + rendering
-- `frontend/server.py`: local API + static file server
-
-## Files
-
-- `config.json`: pairs, timeframes, strategy, risk, and validation settings
-- `requirements.txt`: Python package dependencies
-- `run_all.sh`: one-command launcher for full setup + trading flow + UI
-- `fetch_live_cache.sh`: fetch live Binance market snapshots into local JSON cache
-- `run_ml_walkforward.py`: ML walk-forward optimizer (feature model + sequential trade validation)
-- `run_retune_thresholds.py`: retune `live_loop` thresholds from recent `TRADE_RESULT` history
-- `run_live_adaptive.py`: continuous live paper-trading loop with auto-feedback tuning
-- `src/binance_futures_rest.py`: public Binance futures data client
-- `src/strategy.py`: setup logic + adaptive tuning
-- `src/trade_engine.py`: paper trade lifecycle and PnL
-- `src/alerts.py`: terminal + OS sound alerts
-
-## Output
-
-Runtime prints JSON lines, including:
-
-- `OPEN_TRADE` with pair, timeframe, side, entry, TP, SL, confidence
-- `TRADE_RESULT` with result (`WIN`/`LOSS`) and PnL
-- `POSSIBLE_TRADES` with large ranked candidate pool and probability categories (`70%+`, `50-69%`, `30-49%`, `20-29%`, `<20%`)
-- `RUNTIME_SYMBOLS_UPDATED` when UI symbol updates are applied live
-
-Frontend consumes event stream from:
-
-- `data/live_events.jsonl`
-- historical stream retained in `data/live_events_history.jsonl` for threshold retuning
-
-MongoDB stores runtime data in collections:
-
-- `runtime_events`: all ingested live events (`RUN_STAGE`, `LIVE_MARKET`, `POSSIBLE_TRADES`, `OPEN_TRADE`, `TRADE_RESULT`, etc.)
-- `trade_history`: normalized closed trades for History tab
-- `runtime_control`: symbol/watchlist runtime updates
-- `config_snapshots`: saved config snapshots
-
-## Optional Environment Flags
-
-- `FRONTEND_HOST` (default `127.0.0.1`)
-- `FRONTEND_PORT` (default `8787`)
-- `START_FRONTEND` (default `1`; set `0` to disable UI)
-- `AUTO_INSTALL_DEPS` (default `1`; set `0` only if you want to skip pip installs)
-- `MONGO_URI` (default `mongodb://127.0.0.1:27017`)
-- `MONGO_DB` (default `crypto_trading_live`)
-- `MONGO_REQUIRED` (default `1`; keep `1` to fail fast if MongoDB is unavailable)
-- `OPTIMIZE_TIMEOUT_SEC` (default `45`; live trading starts after timeout if optimizer is still running)
-- `RETUNE_FROM_EVENTS` (default `1`; set `0` to skip history-based threshold retune)
-- `RETUNE_LOOKBACK_TRADES` (default `300`)
-- `RETUNE_MIN_TRADES` (default `20`)
-
-## Data Source Mode
-
-`config.json` -> `data_source`:
-
-- `force_mock: false` keeps live REST as primary
-- `allow_mock_fallback: true` falls back to deterministic mock data if API access fails
-- `mock_seed` controls repeatable mock runs
-
-For strict real-market runs:
-
-- set `force_mock: false`
-- set `allow_mock_fallback: false`
-
-`config.json` -> `execution`:
-
-- `fee_bps_per_side`: exchange fee per side in bps
-- `slippage_bps_per_side`: expected slippage per side in bps
-
-`config.json` -> `live_loop`:
-
-- live symbols/timeframes
-- scan interval and per-trade max wait
-- trade quality filters (`min_rr_floor`, `min_trend_strength`)
-- candidate list controls (`max_parallel_candidates`, `possible_trades_limit`, `min_candidate_confidence`, `min_candidate_expectancy_r`)
-- execution gates (`execute_min_confidence`, `execute_min_expectancy_r`, `execute_min_score`, `require_dual_timeframe_confirm`, `min_score_gap`)
-- adaptive gate relaxation (`relax_after_filter_blocks` + `relax_*`) to prevent prolonged no-trade stalls
-- intratrade risk manager (`enable_break_even`, `break_even_trigger_r`, `break_even_offset_r`, `max_adverse_r_cut`, `max_stagnation_bars`, `min_progress_r_for_stagnation`)
-- loss guard (`loss_guard`) for symbol/global loss-streak pauses with automatic threshold tightening
-- auto quality guard (`performance_guard`) to cooldown weak symbols and retune thresholds
-- target/stop conditions (`target_trades`, `target_win_rate`, `max_cycles`)
-
-Frontend API extras:
-
-- `GET /api/symbols?q=<text>&limit=<n>`: searchable Binance USDT perpetual symbol catalog
-- `POST /api/config/symbols` with `{"symbols":["BTCUSDT","ETHUSDT",...]}` for multi-coin runtime updates
-- `GET /api/news` (or `?force=1`) for latest headline feed aggregation
-- `GET /api/history?limit=<n>`: stored closed-trade history for the History tab
-- `GET /api/storage`: MongoDB connection/storage status
-
-## Important
-
-- This is decision-support tooling, not guaranteed prediction.
-- No strategy can guarantee every trade is a winner in live markets.
-- It uses market-data-driven simulation and live paper-trade tracking; real execution outcomes can differ.
-- Keep API usage within exchange rate limits.
-
-## EC2 Production Deployment (One Script)
-
-On your EC2 instance, inside this project folder:
+### One Command Setup
 
 ```bash
-cd /path/to/crypto
+git clone https://github.com/rishat5081/crypto.git
+cd crypto
+./run_all.sh
+```
+
+This will:
+1. Detect OS and install Python if needed
+2. Create virtualenv and install dependencies
+3. Start the dashboard at `http://127.0.0.1:8787`
+4. Run ML optimization on recent market data
+5. Start the live adaptive trading loop
+
+### Manual Setup
+
+```bash
+# Install dependencies
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+
+# Run tests
+pytest tests/ -v
+
+# Start dashboard
+cd frontend && python server.py &
+
+# Start live trading
+python run_live_adaptive.py --config config.json
+```
+
+## Configuration
+
+All configuration is in `config.json`:
+
+| Section | Key Parameters |
+|---------|---------------|
+| **Strategy** | `ema_fast/slow`, `rsi_period`, `atr_multiplier`, `risk_reward`, `min_confidence` |
+| **Live Loop** | `symbols`, `timeframes`, `max_wait_candles`, `execute_min_*` thresholds |
+| **Risk** | `break_even_trigger_r`, `trail_trigger_r`, `max_adverse_r_cut`, `momentum_reversal_*` |
+| **Loss Guard** | `max_global_consecutive_losses`, `max_symbol_consecutive_losses`, pause cycles |
+| **Performance Guard** | `min_symbol_win_rate`, `rolling_window_trades`, cooldown settings |
+
+## Signal Types
+
+| Type | Trigger | Confidence |
+|------|---------|------------|
+| **Crossover** | EMA fast crosses slow within lookback window | Full |
+| **Pullback** | Price touches fast EMA in established trend | 0.92x |
+| **Momentum** | Price moving in trend direction with strong EMA separation | 0.88x |
+
+## Dashboard Sections
+
+| Section | Description |
+|---------|-------------|
+| **Overview** | Active trade, latest result, performance summary |
+| **Analytics** | Equity curve, rolling win rate, PnL distribution, drawdown charts |
+| **Opportunities** | Multi-coin candidate pool with probability buckets |
+| **Market** | Live price snapshot across all monitored symbols |
+| **Activity** | Per-coin status and system event logs |
+| **History** | Complete closed trade history |
+| **News** | Aggregated crypto market headlines |
+| **Guard** | Symbol health and adaptive retuning events |
+
+## API Endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/api/state` | Current bot state (active trade, performance, signals) |
+| GET | `/api/analytics` | Full analytics (equity curve, drawdown, streaks, PnL) |
+| GET | `/api/history` | Closed trade history |
+| GET | `/api/news` | Market news headlines |
+| GET | `/api/symbols` | Searchable Binance symbol catalog |
+| GET | `/api/storage` | MongoDB connection status |
+| POST | `/api/config/symbols` | Update watchlist at runtime |
+
+## Project Structure
+
+```
+crypto/
+├── .github/                 # CI/CD workflows, templates, config
+├── src/
+│   ├── strategy.py          # Signal generation engine
+│   ├── trade_engine.py      # Paper trade lifecycle
+│   ├── models.py            # Data models
+│   ├── live_adaptive_trader.py  # Main trading loop
+│   ├── binance_futures_rest.py  # Binance API client
+│   ├── indicators.py        # Technical indicators
+│   ├── ml_pipeline.py       # ML walk-forward optimizer
+│   └── alerts.py            # Sound/terminal alerts
+├── frontend/
+│   ├── server.py            # Dashboard API server
+│   ├── index.html           # Dashboard UI
+│   ├── app.js               # Frontend logic + charts
+│   └── styles.css           # Dashboard styling
+├── tests/                   # Unit tests
+├── config.json              # Configuration
+├── run_all.sh               # One-command launcher
+├── run_live_adaptive.py     # Live trading entry point
+├── deploy_ec2.sh            # EC2 deployment script
+└── requirements.txt         # Python dependencies
+```
+
+## Production Deployment
+
+### EC2 (One Script)
+
+```bash
 chmod +x deploy_ec2.sh
 ./deploy_ec2.sh
 ```
 
-That one script will:
-
-- install required system packages
-- provision local MongoDB via Docker (or use external Mongo if configured)
-- create/verify Python virtualenv and dependencies
-- compile Python sources (`py_compile`)
-- create `start_production.sh`
-- register and start `systemd` service `crypto-trader`
-- enable auto-start on reboot and restart-on-failure (24/7)
-
-Useful commands:
+Creates a systemd service with auto-restart:
 
 ```bash
 sudo systemctl status crypto-trader
 sudo journalctl -u crypto-trader -f
 sudo systemctl restart crypto-trader
 ```
+
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `FRONTEND_HOST` | `127.0.0.1` | Dashboard bind address |
+| `FRONTEND_PORT` | `8787` | Dashboard port |
+| `START_FRONTEND` | `1` | Enable/disable dashboard |
+| `MONGO_URI` | `mongodb://127.0.0.1:27017` | MongoDB connection |
+| `MONGO_DB` | `crypto_trading_live` | Database name |
+| `OPTIMIZE_TIMEOUT_SEC` | `45` | ML optimizer timeout |
+
+## Testing
+
+```bash
+# Run all tests
+pytest tests/ -v
+
+# With coverage report
+pytest tests/ -v --cov=src --cov-report=html
+
+# Validate config
+python -c "import json; json.load(open('config.json')); print('OK')"
+```
+
+## Disclaimer
+
+This is a **decision-support tool** for educational and research purposes. It uses paper trading with live market data. No real orders are placed. No strategy guarantees profits. Use at your own risk. Keep API usage within exchange rate limits.
+
+## License
+
+[MIT](LICENSE)

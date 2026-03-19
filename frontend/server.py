@@ -978,6 +978,197 @@ class SymbolCatalog:
             }
 
 
+class AnalyticsEngine:
+    """Computes analytics from trade history for dashboard charts."""
+
+    def __init__(self, history_cache: TradeHistoryCache):
+        self.history_cache = history_cache
+
+    def compute(self) -> Dict[str, Any]:
+        raw = self.history_cache.refresh(limit=2000)
+        items = list(reversed(raw.get("items", [])))  # oldest first
+        if not items:
+            return {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "total_trades": 0,
+                "summary": {},
+                "equity_curve": [],
+                "symbol_breakdown": [],
+                "streaks": {},
+                "drawdown": {},
+                "pnl_distribution": {},
+                "rolling_win_rate": [],
+                "duration_stats": {},
+                "profit_factor": 0.0,
+            }
+
+        # Equity curve
+        equity = 0.0
+        equity_curve = []
+        pnl_values = []
+        wins = 0
+        losses = 0
+        total_win_r = 0.0
+        total_loss_r = 0.0
+        win_streak = 0
+        loss_streak = 0
+        max_win_streak = 0
+        max_loss_streak = 0
+        current_streak_type = None
+        current_streak_count = 0
+        durations = []
+
+        for item in items:
+            pnl_r = float(item.get("pnl_r") or 0)
+            pnl_usd = float(item.get("pnl_usd") or 0)
+            equity += pnl_usd
+            pnl_values.append(pnl_r)
+            result = str(item.get("result") or "").upper()
+
+            opened = item.get("opened_at_ms")
+            closed = item.get("closed_at_ms")
+            if opened and closed:
+                try:
+                    dur_min = (int(closed) - int(opened)) / 60000.0
+                    if dur_min > 0:
+                        durations.append(dur_min)
+                except (ValueError, TypeError):
+                    pass
+
+            ts = item.get("closed_at_ms") or item.get("event_time") or ""
+            equity_curve.append({"time": ts, "equity": round(equity, 4), "pnl_usd": round(pnl_usd, 4)})
+
+            if result == "WIN":
+                wins += 1
+                total_win_r += pnl_r
+                if current_streak_type == "WIN":
+                    current_streak_count += 1
+                else:
+                    current_streak_type = "WIN"
+                    current_streak_count = 1
+                max_win_streak = max(max_win_streak, current_streak_count)
+            elif result == "LOSS":
+                losses += 1
+                total_loss_r += abs(pnl_r)
+                if current_streak_type == "LOSS":
+                    current_streak_count += 1
+                else:
+                    current_streak_type = "LOSS"
+                    current_streak_count = 1
+                max_loss_streak = max(max_loss_streak, current_streak_count)
+
+        total = wins + losses
+        win_rate = (wins / total) if total else 0.0
+        profit_factor = (total_win_r / total_loss_r) if total_loss_r > 0 else 0.0
+        avg_win_r = (total_win_r / wins) if wins else 0.0
+        avg_loss_r = (total_loss_r / losses) if losses else 0.0
+        expectancy_r = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r)
+
+        # Drawdown
+        peak = 0.0
+        max_dd = 0.0
+        running = 0.0
+        dd_curve = []
+        for item in items:
+            running += float(item.get("pnl_usd") or 0)
+            peak = max(peak, running)
+            dd = peak - running
+            max_dd = max(max_dd, dd)
+            ts = item.get("closed_at_ms") or item.get("event_time") or ""
+            dd_curve.append({"time": ts, "drawdown": round(dd, 4)})
+
+        # Symbol breakdown
+        sym_stats: Dict[str, Dict] = {}
+        for item in items:
+            sym = str(item.get("symbol") or "UNKNOWN")
+            if sym not in sym_stats:
+                sym_stats[sym] = {"wins": 0, "losses": 0, "pnl_usd": 0.0, "pnl_r": 0.0}
+            result = str(item.get("result") or "").upper()
+            if result == "WIN":
+                sym_stats[sym]["wins"] += 1
+            elif result == "LOSS":
+                sym_stats[sym]["losses"] += 1
+            sym_stats[sym]["pnl_usd"] += float(item.get("pnl_usd") or 0)
+            sym_stats[sym]["pnl_r"] += float(item.get("pnl_r") or 0)
+
+        symbol_breakdown = []
+        for sym, s in sorted(sym_stats.items()):
+            sym_total = s["wins"] + s["losses"]
+            symbol_breakdown.append({
+                "symbol": sym,
+                "trades": sym_total,
+                "wins": s["wins"],
+                "losses": s["losses"],
+                "win_rate": round(s["wins"] / sym_total, 4) if sym_total else 0,
+                "pnl_usd": round(s["pnl_usd"], 4),
+                "pnl_r": round(s["pnl_r"], 4),
+            })
+
+        # PnL distribution buckets
+        dist_buckets = {"<-1R": 0, "-1R to -0.5R": 0, "-0.5R to 0": 0, "0 to 0.5R": 0, "0.5R to 1R": 0, ">1R": 0}
+        for v in pnl_values:
+            if v < -1:
+                dist_buckets["<-1R"] += 1
+            elif v < -0.5:
+                dist_buckets["-1R to -0.5R"] += 1
+            elif v < 0:
+                dist_buckets["-0.5R to 0"] += 1
+            elif v < 0.5:
+                dist_buckets["0 to 0.5R"] += 1
+            elif v < 1:
+                dist_buckets["0.5R to 1R"] += 1
+            else:
+                dist_buckets[">1R"] += 1
+
+        # Rolling win rate (window of 10 trades)
+        rolling = []
+        window = 10
+        for i in range(len(items)):
+            start = max(0, i - window + 1)
+            chunk = items[start : i + 1]
+            chunk_wins = sum(1 for t in chunk if str(t.get("result") or "").upper() == "WIN")
+            wr = chunk_wins / len(chunk)
+            ts = items[i].get("closed_at_ms") or items[i].get("event_time") or ""
+            rolling.append({"time": ts, "win_rate": round(wr, 4), "trade_num": i + 1})
+
+        # Duration stats
+        dur_stats = {}
+        if durations:
+            dur_stats = {
+                "avg_minutes": round(sum(durations) / len(durations), 1),
+                "min_minutes": round(min(durations), 1),
+                "max_minutes": round(max(durations), 1),
+                "count": len(durations),
+            }
+
+        return {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "total_trades": total,
+            "summary": {
+                "wins": wins,
+                "losses": losses,
+                "win_rate": round(win_rate, 4),
+                "avg_win_r": round(avg_win_r, 4),
+                "avg_loss_r": round(avg_loss_r, 4),
+                "expectancy_r": round(expectancy_r, 4),
+                "total_pnl_usd": round(equity, 4),
+            },
+            "equity_curve": equity_curve,
+            "symbol_breakdown": symbol_breakdown,
+            "streaks": {
+                "max_win_streak": max_win_streak,
+                "max_loss_streak": max_loss_streak,
+                "current_type": current_streak_type,
+                "current_count": current_streak_count,
+            },
+            "drawdown": {"max_drawdown_usd": round(max_dd, 4), "curve": dd_curve},
+            "pnl_distribution": dist_buckets,
+            "rolling_win_rate": rolling,
+            "duration_stats": dur_stats,
+            "profit_factor": round(profit_factor, 4),
+        }
+
+
 class ConfigStore:
     def __init__(
         self,
@@ -1075,6 +1266,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
     news_fetcher: NewsFetcher
     symbol_catalog: SymbolCatalog
     mongo_store: Optional[MongoStore]
+    analytics_engine: AnalyticsEngine
 
     def __init__(
         self,
@@ -1086,6 +1278,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         news_fetcher: NewsFetcher,
         symbol_catalog: SymbolCatalog,
         mongo_store: Optional[MongoStore],
+        analytics_engine: AnalyticsEngine,
         **kwargs: Any,
     ):
         self.cache = cache
@@ -1094,6 +1287,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         self.news_fetcher = news_fetcher
         self.symbol_catalog = symbol_catalog
         self.mongo_store = mongo_store
+        self.analytics_engine = analytics_engine
         super().__init__(*args, directory=directory, **kwargs)
 
     def _write_json(self, payload: Dict[str, Any], status: HTTPStatus = HTTPStatus.OK) -> None:
@@ -1158,6 +1352,9 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             force_values = parse_qs(parsed.query).get("force", ["0"])
             force = str(force_values[0]).strip().lower() in {"1", "true", "yes"}
             self._write_json(self.news_fetcher.refresh(force=force))
+            return
+        if path == "/api/analytics":
+            self._write_json(self.analytics_engine.compute())
             return
         super().do_GET()
 
@@ -1244,6 +1441,7 @@ def main() -> None:
     )
     news_fetcher = NewsFetcher(refresh_seconds=args.news_refresh_sec, max_items=args.news_max_items)
     symbol_catalog = SymbolCatalog(refresh_seconds=300)
+    analytics_engine = AnalyticsEngine(history_cache=history_cache)
 
     def handler_factory(*h_args: Any, **h_kwargs: Any) -> DashboardHandler:
         return DashboardHandler(
@@ -1255,6 +1453,7 @@ def main() -> None:
             news_fetcher=news_fetcher,
             symbol_catalog=symbol_catalog,
             mongo_store=mongo_store,
+            analytics_engine=analytics_engine,
             **h_kwargs,
         )
 

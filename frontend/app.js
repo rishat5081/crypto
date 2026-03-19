@@ -1,6 +1,7 @@
 const REFRESH_MS = 2000;
 const NEWS_REFRESH_MS = 10000;
 const HISTORY_REFRESH_MS = 4000;
+const ANALYTICS_REFRESH_MS = 10000;
 
 let selectedCoin = "ALL";
 let availableCoins = [];
@@ -345,7 +346,13 @@ function renderHistoryRows(historyPayload) {
       const side = String(row.side || "-").toUpperCase();
       const sideClass = side === "LONG" ? "long" : side === "SHORT" ? "short" : "";
       const closed = row.closed_at_ms ? new Date(Number(row.closed_at_ms)).toLocaleString() : fmtTime(row.event_time);
-      return `<tr>
+      const resultText = String(row.result ?? "-");
+      const upper = resultText.toUpperCase();
+      const isWin = upper.includes("WIN") || upper.startsWith("TP");
+      const isLoss = upper.includes("LOSS") || upper.startsWith("SL");
+      const resultPillClass = isWin ? "result-pill result-win" : isLoss ? "result-pill result-loss" : "result-pill";
+      const rowClass = isWin ? "row-win" : isLoss ? "row-loss" : "";
+      return `<tr class="${rowClass}">
         <td>${escapeHtml(closed)}</td>
         <td>${escapeHtml(row.symbol ?? "-")}</td>
         <td>${escapeHtml(row.timeframe ?? "-")}</td>
@@ -354,7 +361,7 @@ function renderHistoryRows(historyPayload) {
         <td>${fmtNumber(row.exit_price, 6)}</td>
         <td>${fmtNumber(row.take_profit, 6)}</td>
         <td>${fmtNumber(row.stop_loss, 6)}</td>
-        <td>${escapeHtml(row.result ?? "-")}</td>
+        <td><span class="${resultPillClass}">${escapeHtml(resultText)}</span></td>
         <td>${fmtNumber(row.pnl_r, 4)}</td>
         <td>${fmtNumber(row.pnl_usd, 4)}</td>
       </tr>`;
@@ -378,6 +385,16 @@ function renderState(state) {
   setText("confidence", fmtPercent(open.confidence));
   setText("score", fmtNumber(open.score, 4));
 
+  // Extra active trade fields
+  const rrVal = Number.isFinite(+open.rr) && open.rr
+    ? fmtNumber(open.rr, 3)
+    : (Number.isFinite(+open.entry) && Number.isFinite(+open.take_profit) && Number.isFinite(+open.stop_loss) && +open.entry !== +open.stop_loss
+        ? fmtNumber(Math.abs(+open.take_profit - +open.entry) / Math.abs(+open.entry - +open.stop_loss), 3)
+        : "-");
+  setText("open_rr", rrVal);
+  setText("open_win_prob", fmtPercent(open.win_probability));
+  setText("open_ev", fmtNumber(open.expectancy_r, 4));
+
   const sideEl = document.getElementById("side");
   if (sideEl) {
     const side = (open.side || "-").toUpperCase();
@@ -389,7 +406,9 @@ function renderState(state) {
 
   const last = filteredTrade(state.last_trade) || {};
   setText("last_symbol", last.symbol || "-");
+  setText("last_side", (last.side || "-").toUpperCase());
   setText("last_result", last.result || "-");
+  setText("last_tf", last.timeframe || "-");
   setText("last_exit", fmtNumber(last.exit_price, 6));
   setText("last_pnl_r", fmtNumber(last.pnl_r, 4));
   setText("last_pnl_usd", fmtNumber(last.pnl_usd, 4));
@@ -406,6 +425,11 @@ function renderState(state) {
   const blockedCount = Array.isArray(summary.blocked_symbols) ? summary.blocked_symbols.length : 0;
   setText("active_symbols_count", activeCount);
   setText("blocked_symbols_count", blockedCount);
+
+  // Win rate progress bar
+  const wr = Number(summary.win_rate || 0);
+  const bar = document.getElementById("win_rate_bar");
+  if (bar) bar.style.width = `${(wr * 100).toFixed(1)}%`;
 
   renderPossibleRows(
     state.possible_trades || [],
@@ -780,13 +804,16 @@ function bindSystemLogControls() {
 }
 
 async function tickState() {
+  const dot = document.getElementById("live_dot");
   try {
     const response = await fetch("/api/state", { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const state = await response.json();
     renderState(state);
+    if (dot) { dot.classList.add("live"); dot.classList.remove("error"); }
   } catch (error) {
     setText("connection", `Disconnected: ${error.message}`);
+    if (dot) { dot.classList.remove("live"); dot.classList.add("error"); }
   }
 }
 
@@ -810,11 +837,240 @@ async function tickHistory() {
   }
 }
 
+// --- Analytics Charts ---
+let equityChart = null;
+let winrateChart = null;
+let pnlDistChart = null;
+let drawdownChart = null;
+let latestAnalytics = null;
+
+const chartDefaults = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: {
+    legend: { display: false },
+  },
+  scales: {
+    x: {
+      ticks: { color: "#9db2ce", font: { size: 10 }, maxTicksLimit: 8 },
+      grid: { color: "rgba(112,145,194,0.12)" },
+    },
+    y: {
+      ticks: { color: "#9db2ce", font: { size: 10 } },
+      grid: { color: "rgba(112,145,194,0.12)" },
+    },
+  },
+};
+
+function fmtChartTime(val) {
+  if (!val) return "";
+  const d = typeof val === "number" ? new Date(val) : new Date(val);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function initCharts() {
+  if (typeof Chart === "undefined") return;
+
+  const eqCtx = document.getElementById("equity_chart");
+  if (eqCtx) {
+    equityChart = new Chart(eqCtx, {
+      type: "line",
+      data: { labels: [], datasets: [{ data: [], borderColor: "#42d2ff", backgroundColor: "rgba(66,210,255,0.08)", fill: true, tension: 0.3, pointRadius: 2 }] },
+      options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, tooltip: { callbacks: { label: (ctx) => `$${ctx.parsed.y.toFixed(4)}` } } } },
+    });
+  }
+
+  const wrCtx = document.getElementById("winrate_chart");
+  if (wrCtx) {
+    winrateChart = new Chart(wrCtx, {
+      type: "line",
+      data: { labels: [], datasets: [{ data: [], borderColor: "#5dffb8", backgroundColor: "rgba(93,255,184,0.08)", fill: true, tension: 0.3, pointRadius: 2 }] },
+      options: {
+        ...chartDefaults,
+        scales: { ...chartDefaults.scales, y: { ...chartDefaults.scales.y, min: 0, max: 1, ticks: { ...chartDefaults.scales.y.ticks, callback: (v) => `${(v * 100).toFixed(0)}%` } } },
+        plugins: { ...chartDefaults.plugins, tooltip: { callbacks: { label: (ctx) => `${(ctx.parsed.y * 100).toFixed(1)}%` } } },
+      },
+    });
+  }
+
+  const pnlCtx = document.getElementById("pnl_dist_chart");
+  if (pnlCtx) {
+    pnlDistChart = new Chart(pnlCtx, {
+      type: "bar",
+      data: {
+        labels: [],
+        datasets: [{
+          data: [],
+          backgroundColor: ["#ff6e63", "#ff9387", "#ffcf73", "#5dffb8", "#42d2ff", "#1fc881"],
+          borderRadius: 4,
+        }],
+      },
+      options: chartDefaults,
+    });
+  }
+
+  const ddCtx = document.getElementById("drawdown_chart");
+  if (ddCtx) {
+    drawdownChart = new Chart(ddCtx, {
+      type: "line",
+      data: { labels: [], datasets: [{ data: [], borderColor: "#ff6e63", backgroundColor: "rgba(255,110,99,0.12)", fill: true, tension: 0.3, pointRadius: 1 }] },
+      options: { ...chartDefaults, plugins: { ...chartDefaults.plugins, tooltip: { callbacks: { label: (ctx) => `-$${ctx.parsed.y.toFixed(4)}` } } } },
+    });
+  }
+}
+
+function renderAnalytics(data) {
+  latestAnalytics = data;
+  if (!data || !data.total_trades) return;
+
+  const s = data.summary || {};
+  setText("analytics_total_trades", data.total_trades);
+  setText("analytics_win_rate", fmtPercent(s.win_rate));
+  setText("analytics_profit_factor", fmtNumber(data.profit_factor, 2));
+  setText("analytics_expectancy", fmtNumber(s.expectancy_r, 4));
+
+  const pnlEl = document.getElementById("analytics_total_pnl");
+  if (pnlEl) {
+    const pnl = s.total_pnl_usd ?? 0;
+    pnlEl.textContent = `$${Number(pnl).toFixed(4)}`;
+    pnlEl.classList.remove("positive", "negative");
+    pnlEl.classList.add(pnl >= 0 ? "positive" : "negative");
+  }
+
+  const ddEl = document.getElementById("analytics_max_dd");
+  if (ddEl) {
+    ddEl.textContent = `$${Number(data.drawdown?.max_drawdown_usd ?? 0).toFixed(4)}`;
+    ddEl.classList.add("negative");
+  }
+
+  setText("analytics_best_streak", `${data.streaks?.max_win_streak ?? 0}W`);
+  setText("analytics_worst_streak", `${data.streaks?.max_loss_streak ?? 0}L`);
+
+  // Sync profit factor to performance card
+  const pfEl = document.getElementById("perf_profit_factor");
+  if (pfEl) pfEl.textContent = fmtNumber(data.profit_factor, 2);
+
+  // Update charts
+  if (equityChart && data.equity_curve?.length) {
+    const labels = data.equity_curve.map((p) => fmtChartTime(p.time));
+    const values = data.equity_curve.map((p) => p.equity);
+    equityChart.data.labels = labels;
+    equityChart.data.datasets[0].data = values;
+    equityChart.update("none");
+  }
+
+  if (winrateChart && data.rolling_win_rate?.length) {
+    const labels = data.rolling_win_rate.map((p) => `#${p.trade_num}`);
+    const values = data.rolling_win_rate.map((p) => p.win_rate);
+    winrateChart.data.labels = labels;
+    winrateChart.data.datasets[0].data = values;
+    winrateChart.update("none");
+  }
+
+  if (pnlDistChart && data.pnl_distribution) {
+    const labels = Object.keys(data.pnl_distribution);
+    const values = Object.values(data.pnl_distribution);
+    pnlDistChart.data.labels = labels;
+    pnlDistChart.data.datasets[0].data = values;
+    pnlDistChart.update("none");
+  }
+
+  if (drawdownChart && data.drawdown?.curve?.length) {
+    const labels = data.drawdown.curve.map((p) => fmtChartTime(p.time));
+    const values = data.drawdown.curve.map((p) => p.drawdown);
+    drawdownChart.data.labels = labels;
+    drawdownChart.data.datasets[0].data = values;
+    drawdownChart.update("none");
+  }
+
+  // Symbol performance grid
+  renderSymbolPerformance(data.symbol_breakdown || []);
+}
+
+function renderSymbolPerformance(symbols) {
+  const grid = document.getElementById("symbol_performance_grid");
+  if (!grid) return;
+
+  if (!symbols.length) {
+    grid.innerHTML = '<p class="meta-inline">No symbol data available.</p>';
+    return;
+  }
+
+  grid.innerHTML = symbols
+    .map((s) => {
+      const cls = s.pnl_usd >= 0 ? "profitable" : "losing";
+      return `<div class="symbol-card ${cls}">
+        <span class="symbol-name">${escapeHtml(s.symbol)}</span>
+        <div class="symbol-stats">
+          <span>Trades</span><strong>${s.trades}</strong>
+          <span>Win Rate</span><strong>${fmtPercent(s.win_rate)}</strong>
+          <span>PnL (R)</span><strong>${fmtNumber(s.pnl_r, 3)}</strong>
+          <span>PnL ($)</span><strong>${fmtNumber(s.pnl_usd, 4)}</strong>
+        </div>
+      </div>`;
+    })
+    .join("");
+}
+
+async function tickAnalytics() {
+  try {
+    const response = await fetch("/api/analytics", { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    renderAnalytics(data);
+  } catch (error) {
+    // Analytics fetch failed silently - non-critical
+  }
+}
+
+function initSectionNav() {
+  const tabs = document.querySelectorAll(".section-tab");
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const target = document.getElementById(tab.dataset.target);
+      if (target) target.scrollIntoView({ behavior: "smooth", block: "start" });
+      tabs.forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+    });
+  });
+
+  const sectionIds = ["sect-overview", "sect-analytics", "sect-opportunities", "sect-market", "sect-activity", "sect-history"];
+  const observer = new IntersectionObserver(
+    (entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) {
+          const id = entry.target.id;
+          tabs.forEach((t) => t.classList.toggle("active", t.dataset.target === id));
+        }
+      });
+    },
+    { rootMargin: "-10% 0px -70% 0px", threshold: 0 }
+  );
+  sectionIds.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) observer.observe(el);
+  });
+}
+
+function initCollapsibles() {
+  document.querySelectorAll(".collapse-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const section = btn.closest(".collapsible-section");
+      if (!section) return;
+      const isCollapsed = section.classList.toggle("collapsed");
+      btn.textContent = isCollapsed ? "▸" : "▾";
+    });
+  });
+}
+
 async function init() {
   bindCoinControls();
   bindOpportunityControls();
   bindNewsControls();
   bindSystemLogControls();
+  initSectionNav();
+  initCollapsibles();
 
   try {
     await loadCoinOptions();
@@ -830,11 +1086,15 @@ async function init() {
     setNewsStatus(`Failed to load news: ${error.message}`, true);
   }
 
+  initCharts();
+
   setInterval(tickState, REFRESH_MS);
   setInterval(tickNews, NEWS_REFRESH_MS);
   setInterval(tickHistory, HISTORY_REFRESH_MS);
+  setInterval(tickAnalytics, ANALYTICS_REFRESH_MS);
   tickState();
   tickHistory();
+  tickAnalytics();
 }
 
 init();
