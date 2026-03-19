@@ -13,7 +13,10 @@ def main() -> None:
     parser.add_argument("--config", default="config.json", help="Path to config.json")
     args = parser.parse_args()
 
-    config = load_config(str(Path(args.config)))
+    config_path = Path(args.config).resolve()
+    config = load_config(str(config_path))
+    config["_config_path"] = str(config_path)
+
     trader = LiveAdaptivePaperTrader(config)
     result = trader.run()
     print(json.dumps({"type": "FINAL", "result": result}, indent=2))

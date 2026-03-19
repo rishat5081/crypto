@@ -220,7 +220,6 @@ class MLWalkForwardOptimizer:
             self._safe_div(candle.close - prev6, prev6),
             self._safe_div(candle.close - prev12, prev12),
             self._safe_div(candle.volume - vol_mean, vol_mean),
-            dataset.market.funding_rate,
             confidence,
             rr,
         ]
@@ -433,7 +432,14 @@ class MLWalkForwardOptimizer:
                 trades = len(picked)
                 if trades < 5:
                     continue
-                score = (win_rate, wins, expectancy_r)
+                # Prefer thresholds that keep expectancy positive first, then maximize expectancy and win quality.
+                score = (
+                    1 if expectancy_r > 0 else 0,
+                    expectancy_r,
+                    win_rate,
+                    wins,
+                    trades,
+                )
                 if best_score is None or score > best_score:
                     best_score = score
                     best_threshold = threshold
@@ -516,12 +522,12 @@ class MLWalkForwardOptimizer:
         candidates: List[Dict] = []
 
         for ema_fast in [8, 13, 21]:
-            for ema_slow in [34, 55]:
+            for ema_slow in [34, 55, 89]:
                 if ema_fast >= ema_slow:
                     continue
-                for atr_mult in [0.8, 1.0, 1.2, 1.6]:
-                    for rr in [0.5, 0.8, 1.0]:
-                        for min_conf in [0.6, 0.7, 0.8]:
+                for atr_mult in [0.7, 0.9, 1.1, 1.4, 1.8]:
+                    for rr in [1.2, 1.0, 1.5, 0.8]:
+                        for min_conf in [0.65, 0.7, 0.75, 0.8, 0.85]:
                             candidate = copy.deepcopy(base_strategy)
                             candidate["ema_fast"] = ema_fast
                             candidate["ema_slow"] = ema_slow
@@ -550,11 +556,28 @@ class MLWalkForwardOptimizer:
             )
             tested += 1
 
-            score = (result.wins, result.win_rate, result.expectancy_r)
-            if best is None or score > (best.wins, best.win_rate, best.expectancy_r):
+            score = (
+                1 if result.expectancy_r > 0 else 0,
+                result.expectancy_r,
+                result.win_rate,
+                result.wins,
+                result.total_selected_trades,
+            )
+            best_score = (
+                1 if best.expectancy_r > 0 else 0,
+                best.expectancy_r,
+                best.win_rate,
+                best.wins,
+                best.total_selected_trades,
+            ) if best is not None else None
+            if best is None or (best_score is not None and score > best_score):
                 best = result
 
-            if result.total_selected_trades >= target_trades and result.wins >= target_wins:
+            if (
+                result.total_selected_trades >= target_trades
+                and result.wins >= target_wins
+                and result.expectancy_r > 0
+            ):
                 return result, tested
 
         if best is None:

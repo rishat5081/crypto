@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pytest
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short
+
+      - name: Build distribution
+        run: |
+          mkdir -p dist
+          tar czf dist/crypto-trader-${{ github.ref_name }}.tar.gz \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='.pytest_cache' \
+            --exclude='data/*.jsonl' \
+            --exclude='dist' \
+            --exclude='.venv' \
+            .
+
+      - name: Generate changelog
+        id: changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            echo "## Changes since $PREV_TAG" > CHANGELOG.md
+            git log $PREV_TAG..HEAD --pretty=format:"- %s (%h)" >> CHANGELOG.md
+          else
+            echo "## Initial Release" > CHANGELOG.md
+            git log --pretty=format:"- %s (%h)" -20 >> CHANGELOG.md
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          body_path: CHANGELOG.md
+          generate_release_notes: true

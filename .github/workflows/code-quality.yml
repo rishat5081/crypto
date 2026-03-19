@@ -1,0 +1,49 @@
+name: Code Quality
+
+on:
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 9 * * 1" # Weekly Monday 9am UTC
+
+jobs:
+  audit:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt pip-audit safety
+
+      - name: Pip audit
+        run: pip-audit --strict || true
+
+      - name: Safety check
+        run: safety check --full-report || true
+
+  complexity:
+    name: Code Complexity
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install radon
+        run: pip install radon
+
+      - name: Cyclomatic complexity
+        run: radon cc src/ -a -nc
+
+      - name: Maintainability index
+        run: radon mi src/ -nc

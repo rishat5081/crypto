@@ -115,3 +115,49 @@ class BinanceFuturesRestClient:
             # Use latest mock candle close as mark price base.
             mock_candle = self.mock.klines(symbol=symbol, interval="5m", limit=2)[-1]
             return self.mock.market_context(symbol=symbol, mark_price=mock_candle.close)
+
+    def fetch_all_premium_index(self) -> Dict[str, MarketContext]:
+        """Batch fetch premium index for ALL symbols (API weight: 10)."""
+        try:
+            rows = self._get_json("/fapi/v1/premiumIndex", {})
+        except Exception:
+            if not self.allow_mock_fallback and not self.force_mock:
+                raise
+            self.used_mock = True
+            return {}
+
+        result: Dict[str, MarketContext] = {}
+        for row in rows:
+            symbol = str(row.get("symbol", "")).strip().upper()
+            if not symbol:
+                continue
+            try:
+                result[symbol] = MarketContext(
+                    mark_price=float(row["markPrice"]),
+                    funding_rate=float(row["lastFundingRate"]),
+                    open_interest=0.0,
+                )
+            except (KeyError, ValueError, TypeError):
+                continue
+        return result
+
+    def fetch_all_ticker_prices(self) -> Dict[str, float]:
+        """Batch fetch ticker prices for ALL symbols (API weight: 2)."""
+        try:
+            rows = self._get_json("/fapi/v1/ticker/price", {})
+        except Exception:
+            if not self.allow_mock_fallback and not self.force_mock:
+                raise
+            self.used_mock = True
+            return {}
+
+        result: Dict[str, float] = {}
+        for row in rows:
+            symbol = str(row.get("symbol", "")).strip().upper()
+            if not symbol:
+                continue
+            try:
+                result[symbol] = float(row["price"])
+            except (KeyError, ValueError, TypeError):
+                continue
+        return result

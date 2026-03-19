@@ -21,6 +21,21 @@ def ema(values: Iterable[float], period: int) -> float:
     return current
 
 
+def ema_series(values: Iterable[float], period: int) -> List[float]:
+    """Return full EMA series (one value per input value after warm-up)."""
+    series = _as_list(values)
+    if len(series) < period:
+        raise ValueError("Not enough values for EMA series")
+
+    k = 2 / (period + 1)
+    current = sum(series[:period]) / period
+    result = [current]
+    for v in series[period:]:
+        current = (v * k) + (current * (1 - k))
+        result.append(current)
+    return result
+
+
 def rsi(values: Iterable[float], period: int) -> float:
     series = _as_list(values)
     if len(series) <= period:

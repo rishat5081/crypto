@@ -63,6 +63,11 @@ class OpenTrade:
     opened_at_ms: int
     reason: str
     signal_confidence: float
+    original_stop_loss: Optional[float] = None
+
+    def __post_init__(self):
+        if self.original_stop_loss is None:
+            self.original_stop_loss = self.stop_loss
 
     def update_with_candle(
         self,
@@ -95,12 +100,16 @@ class OpenTrade:
                 exit_price = self.take_profit
                 result = "WIN"
 
-        risk_per_unit = abs(self.entry - self.stop_loss)
+        risk_per_unit = abs(self.entry - (self.original_stop_loss or self.stop_loss))
         pnl_per_unit = (
             exit_price - self.entry if self.side == "LONG" else self.entry - exit_price
         )
         pnl_r = pnl_per_unit / risk_per_unit if risk_per_unit > 0 else 0.0
         pnl_usd = pnl_r * risk_usd
+
+        # When trailing stop moved SL into profit, hitting SL is actually a WIN
+        if pnl_r > 0:
+            result = "WIN"
 
         return ClosedTrade(
             symbol=self.symbol,

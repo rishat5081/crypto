@@ -4,41 +4,41 @@
     "risk_per_trade_pct": 0.02
   },
   "execution": {
-    "fee_bps_per_side": 0.0,
-    "slippage_bps_per_side": 0.0
+    "fee_bps_per_side": 2,
+    "slippage_bps_per_side": 1
   },
   "pairs": [
     "BTCUSDT",
     "ETHUSDT",
     "SOLUSDT",
     "BNBUSDT",
-    "XRPUSDT"
+    "XRPUSDT",
+    "ADAUSDT"
   ],
   "timeframes": [
-    "1m",
-    "5m",
     "15m"
   ],
   "strategy": {
-    "lookback_candles": 220,
-    "ema_fast": 8,
+    "lookback_candles": 260,
+    "ema_fast": 21,
     "ema_slow": 55,
     "rsi_period": 14,
     "atr_period": 14,
-    "atr_multiplier": 1.2,
-    "risk_reward": 0.5,
+    "atr_multiplier": 1.5,
+    "risk_reward": 1.2,
     "min_atr_pct": 0.0015,
     "max_atr_pct": 0.03,
     "funding_abs_limit": 0.001,
-    "min_confidence": 0.8,
-    "long_rsi_min": 55,
+    "min_confidence": 0.60,
+    "crossover_lookback": 12,
+    "long_rsi_min": 45,
     "long_rsi_max": 72,
-    "short_rsi_min": 28,
-    "short_rsi_max": 48
+    "short_rsi_min": 18,
+    "short_rsi_max": 50
   },
   "scanner": {
     "poll_seconds": 20,
-    "enable_sound": true
+    "enable_sound": false
   },
   "data_source": {
     "allow_mock_fallback": false,
@@ -53,40 +53,105 @@
   },
   "live_loop": {
     "symbols": [
-      "BTCUSDT",
-      "ETHUSDT",
-      "SOLUSDT",
       "XRPUSDT",
+      "SOLUSDT",
       "ADAUSDT",
       "BNBUSDT",
+      "BTCUSDT",
+      "ETHUSDT",
       "DOGEUSDT",
-      "LINKUSDT",
       "AVAXUSDT",
-      "TRXUSDT"
+      "DOTUSDT",
+      "LINKUSDT"
     ],
     "timeframes": [
-      "1m",
       "5m",
       "15m"
     ],
     "lookback_candles": 260,
+    "klines_window_size": 20,
     "poll_seconds": 12,
-    "max_wait_minutes_per_trade": 5,
-    "min_rr_floor": 0.2,
-    "min_trend_strength": 0.0004,
-    "top_n": 3,
+    "max_wait_candles": 12,
+    "max_wait_minutes_per_trade": 180,
+    "min_rr_floor": 0.6,
+    "min_trend_strength": 0.0012,
+    "max_parallel_candidates": 1000,
+    "possible_trades_limit": 1000,
+    "min_candidate_confidence": 0.65,
+    "min_candidate_expectancy_r": 0.05,
+    "execute_min_confidence": 0.62,
+    "execute_min_expectancy_r": 0.05,
+    "execute_min_score": 0.55,
+    "require_dual_timeframe_confirm": false,
+    "min_score_gap": 0.0,
+    "relax_after_filter_blocks": 6,
+    "relax_conf_step": 0.005,
+    "relax_expectancy_step": 0.01,
+    "relax_score_step": 0.005,
+    "relax_min_execute_confidence": 0.60,
+    "relax_min_execute_expectancy_r": 0.03,
+    "relax_min_execute_score": 0.50,
+    "enable_break_even": true,
+    "break_even_trigger_r": 0.8,
+    "break_even_offset_r": 0.02,
+    "enable_trailing_stop": true,
+    "trail_trigger_r": 0.5,
+    "trail_keep_pct": 0.85,
+    "max_adverse_r_cut": 1.1,
+    "max_stagnation_bars": 6,
+    "min_progress_r_for_stagnation": 0.10,
+    "momentum_reversal_bars": 3,
+    "momentum_reversal_r": -0.4,
+    "loss_guard": {
+      "enabled": true,
+      "max_global_consecutive_losses": 3,
+      "global_pause_cycles": 3,
+      "max_symbol_consecutive_losses": 3,
+      "symbol_pause_cycles": 4
+    },
+    "performance_guard": {
+      "enabled": true,
+      "rolling_window_trades": 12,
+      "min_symbol_trades": 2,
+      "min_symbol_win_rate": 0.40,
+      "min_symbol_expectancy_r": 0.0,
+      "cooldown_cycles": 6,
+      "min_active_symbols": 3,
+      "global_window_trades": 8,
+      "global_min_win_rate": 0.6,
+      "global_min_expectancy_r": 0.0
+    },
+    "top_n": 1,
     "target_trades": 3,
-    "target_win_rate": 0.75,
+    "target_win_rate": 0.8,
     "min_trades_for_success": 3,
-    "max_cycles": 500
+    "max_cycles": 50,
+    "execute_min_win_probability": 0.50
   },
   "ml": {
     "last_walk_forward": {
-      "selected_trades": 200,
-      "wins": 139,
-      "losses": 61,
-      "win_rate": 0.695,
-      "expectancy_r": 0.0425
+      "selected_trades": 66,
+      "wins": 40,
+      "losses": 26,
+      "win_rate": 0.606,
+      "expectancy_r": 0.3807
+    }
+  },
+  "audit": {
+    "last_high_hit_backtest": {
+      "symbols": [
+        "XRPUSDT",
+        "SOLUSDT",
+        "ADAUSDT"
+      ],
+      "timeframes": [
+        "15m"
+      ],
+      "trades": 10,
+      "wins": 9,
+      "losses": 1,
+      "win_rate": 0.9,
+      "expectancy_r": 0.53
     }
   }
 }
