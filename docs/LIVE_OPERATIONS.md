@@ -204,41 +204,53 @@ print(f"Bearish crossover: {bear_x}")
 
 ## No Signals — What It Means
 
-The strategy requires **all conditions simultaneously**:
+The strategy (v1.4) requires **all conditions simultaneously**:
 
 ### For a LONG signal
-1. EMA(21) > EMA(55) — bullish trend
-2. EMA crossover within last 12 bars
-3. RSI between 45 and 72
-4. Price ≥ fast EMA
-5. |funding_rate| ≤ 0.001
-6. ATR% between 0.15% and 3.0%
+1. **Price ≥ EMA(200)** — macro bullish trend *(v1.4 addition)*
+2. EMA(21) > EMA(55) — short-term bullish trend
+3. EMA crossover within last 12 bars (or pullback/momentum mode)
+4. RSI between **48 and 70** *(v1.4: tightened from 45–72)*
+5. Price ≥ fast EMA
+6. |funding_rate| ≤ 0.001
+7. ATR% between 0.15% and 3.0%
 
 ### For a SHORT signal
-1. EMA(21) < EMA(55) — bearish trend
-2. EMA crossover within last 12 bars
-3. RSI between 18 and 50
-4. Price ≤ fast EMA
-5. |funding_rate| ≤ 0.001
-6. ATR% between 0.15% and 3.0%
+1. **Price ≤ EMA(200)** — macro bearish trend *(v1.4 addition)*
+2. EMA(21) < EMA(55) — short-term bearish trend
+3. EMA crossover within last 12 bars (or pullback/momentum mode)
+4. RSI between **22 and 47** *(v1.4: tightened from 18–50)*
+5. Price ≤ fast EMA
+6. |funding_rate| ≤ 0.001
+7. ATR% between 0.15% and 3.0%
 
 ### Typical blockers
 
 | Blocker | What it means | Action |
 |---------|---------------|--------|
-| No EMA crossover | Market is mid-trend or consolidating — the crossover already happened | Wait for next momentum shift |
-| RSI out of range | RSI too neutral (40–45) — no directional conviction | Normal in sideways markets |
-| Funding rate too high | Futures market over-leveraged; risk of squeeze | System correctly avoids trade |
-| ATR% too low | Market is too quiet / choppy | May occur in late-session hours |
-| Crossover drift | Crossover happened but price already moved >0.5 ATR from it | Fresh signal will come |
+| Price wrong side of EMA(200) | Macro trend opposes signal direction | Wait for macro trend reversal or skip |
+| No EMA crossover | Market is mid-trend or consolidating | Wait for next momentum shift |
+| RSI out of range | RSI too neutral — no directional conviction | Normal in sideways markets |
+| Funding rate too high | Futures market over-leveraged | System correctly avoids trade |
+| ATR% too low | Market too quiet / choppy | May occur in late-session hours |
+| Crossover drift | Crossover happened but price already moved >0.5 ATR | Fresh signal will come |
+| conf < 0.70 | Signal too weak to execute | Market borderline — wait for cleaner setup |
 
 ### Live observation (2026-03-20)
 
 All 20 symbol/timeframe combos blocked by:
-- **Primary**: no EMA crossover in last 12 bars
+- **Primary**: no EMA(21)/EMA(55) crossover in last 12 bars
 - Market context: RSI 40–50 (neutral), funding rates ±0.001–0.010% (healthy)
-- All ATR values within valid range
 - This is **normal** — not a bug. The system waits for quality setups.
+
+### Live observation (2026-03-24)
+
+Under v1.4 settings — 3 executable signals on first cycle:
+- **DOTUSDT/15m SHORT** conf=0.712 — price < EMA(200), RSI=33.9 (bearish)
+- **XRPUSDT/15m SHORT** conf=0.747 — price < EMA(200), RSI=37.0
+- **BNBUSDT/15m SHORT** conf=0.774 — price < EMA(200), RSI=41.0
+
+DOTUSDT selected (highest score=0.798). Result: **WIN +0.390R** via trail stop at 16:45 UTC.
 
 ---
 

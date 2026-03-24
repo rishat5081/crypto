@@ -24,6 +24,7 @@ class StrategyParameters:
     short_rsi_min: float
     short_rsi_max: float
     crossover_lookback: int = 5
+    ema_trend: int = 0  # 0 = disabled; set to e.g. 200 to only trade with macro trend
 
 
 class StrategyEngine:
@@ -48,6 +49,7 @@ class StrategyEngine:
             short_rsi_min=float(payload["short_rsi_min"]),
             short_rsi_max=float(payload["short_rsi_max"]),
             crossover_lookback=int(payload.get("crossover_lookback", 5)),
+            ema_trend=int(payload.get("ema_trend", 0)),
         )
         return cls(params)
 
@@ -117,11 +119,21 @@ class StrategyEngine:
             if bear_age >= 3 and bear_drift > 0.5:
                 bearish_cross = False
 
+        # Macro trend filter: restrict direction to align with EMA(ema_trend).
+        # Prevents taking SHORT trades in a long-term bull market and vice-versa.
+        allow_long = True
+        allow_short = True
+        if self.params.ema_trend > 0 and len(close_prices) >= self.params.ema_trend:
+            ema_trend_v = ema(close_prices, self.params.ema_trend)
+            allow_long = entry >= ema_trend_v
+            allow_short = entry <= ema_trend_v
+
         side: Optional[str] = None
         signal_type = "CROSSOVER"
 
         if (
-            ema_fast_v > ema_slow_v
+            allow_long
+            and ema_fast_v > ema_slow_v
             and bullish_cross
             and self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max
             and entry >= ema_fast_v
@@ -129,7 +141,8 @@ class StrategyEngine:
         ):
             side = "LONG"
         elif (
-            ema_fast_v < ema_slow_v
+            allow_short
+            and ema_fast_v < ema_slow_v
             and bearish_cross
             and self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max
             and entry <= ema_fast_v
@@ -146,14 +159,14 @@ class StrategyEngine:
             # Require established trend: EMA gap > 0.3%
             if trend_strength > 0.003:
                 prev_close = candles[-2].close if len(candles) >= 2 else entry
-                if ema_fast_v > ema_slow_v:
+                if allow_long and ema_fast_v > ema_slow_v:
                     # Bullish trend: price pulled back near fast EMA and bounced
                     touch_dist = abs(candles[-1].low - ema_fast_v) / atr_v if atr_v else 999
                     bounced = entry > ema_fast_v and prev_close <= ema_fast_v * 1.002
                     if (touch_dist < 1.2 or bounced) and self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
                         side = "LONG"
                         signal_type = "PULLBACK"
-                else:
+                elif allow_short and ema_fast_v < ema_slow_v:
                     # Bearish trend: price pulled back near fast EMA and rejected
                     touch_dist = abs(candles[-1].high - ema_fast_v) / atr_v if atr_v else 999
                     rejected = entry < ema_fast_v and prev_close >= ema_fast_v * 0.998
@@ -167,12 +180,12 @@ class StrategyEngine:
         if not side and abs(market.funding_rate) <= self.params.funding_abs_limit:
             trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
             if trend_strength > 0.004:
-                if ema_fast_v < ema_slow_v and entry < ema_fast_v:
+                if allow_short and ema_fast_v < ema_slow_v and entry < ema_fast_v:
                     # Strong bearish: price below fast EMA, trending down
                     if self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max:
                         side = "SHORT"
                         signal_type = "MOMENTUM"
-                elif ema_fast_v > ema_slow_v and entry > ema_fast_v:
+                elif allow_long and ema_fast_v > ema_slow_v and entry > ema_fast_v:
                     # Strong bullish: price above fast EMA, trending up
                     if self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
                         side = "LONG"
@@ -203,12 +216,31 @@ class StrategyEngine:
         vol_score = max(0.0, 1 - abs(atr_pct - atr_mid) / atr_half_range)
         funding_score = 1 - min(abs(market.funding_rate) / self.params.funding_abs_limit, 1.0)
 
-        confidence = 0.10 + (0.40 * trend_score) + (0.20 * rsi_score) + (0.18 * vol_score) + (0.12 * funding_score)
+        # Crossover freshness: how recently did the EMA cross happen (fewer bars ago = better)?
+        if signal_type == "CROSSOVER":
+            is_bull = side == "LONG"
+            cross_age, _ = _crossover_age_and_drift(recent_diffs, is_bull)
+            freshness_score = max(0.0, 1.0 - cross_age / crossover_lookback)
+        else:
+            freshness_score = 0.0  # pullback/momentum don't rely on crossover age
+
+        # Macro trend alignment bonus: signal passed the EMA(trend) filter → aligned with macro trend
+        macro_bonus = 0.08 if (self.params.ema_trend > 0 and len(close_prices) >= self.params.ema_trend) else 0.0
+
+        confidence = (
+            0.08
+            + (0.35 * trend_score)
+            + (0.18 * rsi_score)
+            + (0.15 * vol_score)
+            + (0.10 * funding_score)
+            + (0.12 * freshness_score)
+            + macro_bonus
+        )
         # Non-crossover entries get confidence discounts
         if signal_type == "PULLBACK":
             confidence *= 0.92
         elif signal_type == "MOMENTUM":
-            confidence *= 0.88
+            confidence *= 0.85  # heavier discount — least reliable signal type
         confidence = max(0.0, min(confidence, 0.99))
 
         if confidence < self.params.min_confidence:

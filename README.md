@@ -230,9 +230,10 @@ python -c "import json; json.load(open('config.json')); print('OK')"
 | Document | Description |
 |----------|-------------|
 | [`docs/HANDBOOK.md`](docs/HANDBOOK.md) | Developer guide: setup, strategy deep-dive, trade lifecycle, deployment |
+| [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | Win-rate optimization: root cause analysis, parameter changes, projections |
 | [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) | All REST endpoints with request/response schemas |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design, data flow, module dependencies, data models |
-| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | Every `config.json` parameter with types and defaults |
+| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | Every `config.json` parameter with current values and rationale |
 | [`docs/LIVE_OPERATIONS.md`](docs/LIVE_OPERATIONS.md) | Live market monitoring, signal diagnosis, runtime control |
 | [`CHANGELOG.md`](CHANGELOG.md) | Version history and release notes |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution guidelines and PR process |

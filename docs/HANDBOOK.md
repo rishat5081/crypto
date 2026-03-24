@@ -99,44 +99,68 @@ Candles (260 bars) → Indicators → Signal Detection → Confidence Score → 
 | RSI | 14 | Overbought/oversold |
 | ATR | 14 | Volatility for TP/SL sizing |
 
+### Macro Trend Filter (v1.4+)
+
+Before any signal fires, the EMA(200) macro filter is applied:
+
+```python
+allow_long  = price >= EMA(200)   # only LONG in bull macro trend
+allow_short = price <= EMA(200)   # only SHORT in bear macro trend
+```
+
+This is the single highest-impact fix: in bulk testing, 70.2% of trades were SHORT
+while LONGs were 3× more profitable. Without this filter, the strategy generates
+counter-trend trades that systematically lose.
+
+Set `ema_trend: 0` in `config.json` to disable (not recommended).
+
 ### Three Signal Types
 
 #### 1. Crossover Entry
 - **Trigger**: EMA(21) crosses EMA(55) within last 12 bars
-- **Filter**: RSI in range, price above/below fast EMA, funding rate OK
-- **Confidence**: Full (no discount)
+- **Filter**: Macro trend aligned, RSI in range, price above/below fast EMA, funding rate OK
+- **Confidence**: Full weight (+ freshness bonus)
 - **Stale filter**: Rejects crossovers 3+ bars old where price moved >0.5 ATR
 
 #### 2. Pullback Entry
 - **Trigger**: Price within 1.2 ATR of fast EMA in established trend (EMA gap > 0.3%)
-- **Filter**: Same RSI/funding filters
-- **Confidence**: 0.92x multiplier
+- **Filter**: Macro trend aligned, same RSI/funding filters
+- **Confidence**: 0.92× multiplier
 - **Use case**: Catches trend continuations when crossovers are rare
 
 #### 3. Momentum Entry
 - **Trigger**: Price moving in trend direction, EMA gap > 0.4%, price beyond fast EMA
-- **Filter**: RSI alignment
-- **Confidence**: 0.88x multiplier
-- **Use case**: Strong trending moves where pullback hasn't occurred
+- **Filter**: Macro trend aligned, RSI alignment
+- **Confidence**: 0.85× multiplier (tightened from 0.88 in v1.4)
+- **Use case**: Strong trending moves; least reliable signal type, use with caution
 
-### Confidence Calculation
+### Confidence Calculation (v1.4)
 
 ```
-confidence = 0.10 (base)
-           + 0.40 * trend_score      # EMA separation normalized
-           + 0.20 * rsi_score        # Proximity to RSI sweet spot
-           + 0.18 * vol_score        # ATR position in allowed range
-           + 0.12 * funding_score    # Low funding = good
+confidence = 0.08 (base)
+           + 0.35 × trend_score      # EMA(21/55) separation normalised to 0.2%
+           + 0.18 × rsi_score        # Proximity to RSI sweet spot
+           + 0.15 × vol_score        # ATR position in allowed range
+           + 0.10 × funding_score    # Low funding rate = favourable
+           + 0.12 × freshness_score  # Crossover age: 0=stale, 1=fresh (1-2 bars)
+           + 0.08 (macro_bonus)      # Flat bonus when EMA(200) filter is active
+
+# Signal-type discounts applied after base calculation:
+CROSSOVER:  × 1.00
+PULLBACK:   × 0.92
+MOMENTUM:   × 0.85
 ```
+
+Maximum achievable confidence: `(0.08+0.35+0.18+0.15+0.10+0.12+0.08) × 1.0 = 1.06` → capped at 0.99.
 
 ### TP/SL Placement
 
 ```
-SL distance = ATR(14) * atr_multiplier (1.5)
-TP distance = SL distance * risk_reward (1.2)
+SL distance = ATR(14) × atr_multiplier (1.5)
+TP distance = SL distance × risk_reward (1.5)   ← raised from 1.2 in v1.4
 
-LONG:  SL = entry - SL_distance,  TP = entry + TP_distance
-SHORT: SL = entry + SL_distance,  TP = entry - TP_distance
+LONG:  SL = entry − SL_distance,  TP = entry + TP_distance
+SHORT: SL = entry + SL_distance,  TP = entry − TP_distance
 ```
 
 ---
@@ -154,15 +178,18 @@ SHORT: SL = entry + SL_distance,  TP = entry - TP_distance
 
 ### Monitoring (`_wait_for_close`)
 
-Each candle close triggers:
+Each candle close triggers (in priority order):
 1. **TP/SL check**: `OpenTrade.update_with_candle()` checks if levels are hit
-2. **Trailing stop**: If `best_r >= 0.5`, trail SL keeping 85% of peak
-3. **Break-even**: If `best_r >= 0.8`, move SL to entry + offset
-4. **Adverse cut**: If worst intra-bar R < -1.1R, force close
-5. **Momentum reversal**: 3+ consecutive adverse bars AND current R < -0.4R
+2. **Trailing stop**: If `best_r >= 0.3` *(v1.4: was 0.5)*, trail SL keeping 92% of peak *(v1.4: was 85%)*
+3. **Break-even**: If `best_r >= 0.6` *(v1.4: was 0.8)*, move SL to entry + 0.05×risk *(v1.4: was 0.02)*
+4. **Adverse cut**: If worst intra-bar R < −0.85R *(v1.4: was −1.1R)*, force close
+5. **Momentum reversal**: 3+ consecutive adverse bars AND current R < −0.4R
 6. **Stagnation**: 6+ bars with best_r < 0.1R
 7. **Candle timeout**: After 12 candles
 8. **Network protection**: 5 consecutive API failures → force close
+
+> Trail and break-even are **mutually exclusive**: trail triggers first (`elif`). If trail is
+> active, break-even is never applied.
 
 ### Closing
 
