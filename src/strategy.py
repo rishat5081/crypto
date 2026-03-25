@@ -238,9 +238,9 @@ class StrategyEngine:
         )
         # Non-crossover entries get confidence discounts
         if signal_type == "PULLBACK":
-            confidence *= 0.92
+            confidence *= 0.88  # tightened from 0.92 — pullbacks need stronger base conviction
         elif signal_type == "MOMENTUM":
-            confidence *= 0.85  # heavier discount — least reliable signal type
+            confidence *= 0.82  # tightened from 0.85 — least reliable signal type
         confidence = max(0.0, min(confidence, 0.99))
 
         if confidence < self.params.min_confidence:
