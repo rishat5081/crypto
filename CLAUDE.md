@@ -166,6 +166,12 @@ LiveAdaptivePaperTrader.run():
 ### Add a new symbol
 Edit `config.json` → `live_loop.symbols` array. Or POST to `/api/config/symbols`.
 
+**Current watchlist: 60 symbols** across 6 categories (Large Cap, DeFi, Layer-2, Gaming, AI/Infra, Other).
+Before adding, verify the symbol is an active Binance Futures perpetual:
+```bash
+curl "https://fapi.binance.com/fapi/v1/ticker/price?symbol=NEWUSDT"
+```
+
 ### Add a new signal type
 1. `src/strategy.py` → `evaluate()`: Add detection logic after the momentum block
 2. Apply confidence multiplier (e.g., `confidence *= 0.90`)

@@ -48,10 +48,35 @@ All configuration lives in `config.json`. This document explains every parameter
 
 | Key | Type | Description |
 |-----|------|-------------|
-| `symbols` | string[] | Trading symbols (e.g., `["BTCUSDT", "ETHUSDT"]`) |
+| `symbols` | string[] | Trading symbols — **60 Binance Futures USDT perpetuals** (see full list below) |
 | `timeframes` | string[] | Candle timeframes. **Use `["15m"]` only** — 5m had 34.2% WR vs 37.7% for 15m in bulk testing |
 | `lookback_candles` | int | Candles to fetch per symbol |
-| `klines_window_size` | int | Symbols to scan per cycle (rotating window) |
+| `klines_window_size` | int | Symbols to scan per cycle. Set to `60` to scan all symbols each cycle |
+
+#### Full symbol list (60 coins, verified 2026-03-25)
+
+| Category | Symbols |
+|----------|---------|
+| **Large Cap** | BTCUSDT, ETHUSDT, BNBUSDT, XRPUSDT, SOLUSDT, ADAUSDT, DOGEUSDT, AVAXUSDT, DOTUSDT, LINKUSDT, LTCUSDT, TRXUSDT, ETCUSDT, XLMUSDT, ATOMUSDT, BCHUSDT, ZECUSDT, XMRUSDT, YFIUSDT, HYPEUSDT |
+| **DeFi / DEX** | UNIUSDT, AAVEUSDT, CRVUSDT, COMPUSDT, SUSHIUSDT, 1INCHUSDT, RUNEUSDT, GRTUSDT, LDOUSDT, GMXUSDT |
+| **Layer-2 / Ecosystem** | OPUSDT, ARBUSDT, INJUSDT, APTUSDT, SUIUSDT, NEARUSDT, ICPUSDT, STXUSDT, IMXUSDT, FLOWUSDT |
+| **Gaming / Metaverse** | MANAUSDT, SANDUSDT, GALAUSDT, AXSUSDT, ENJUSDT, CHZUSDT, GMTUSDT, APEUSDT |
+| **AI / Infrastructure** | FETUSDT, FILUSDT, QNTUSDT, THETAUSDT, EGLDUSDT, CFXUSDT, WLDUSDT |
+| **Other Established** | VETUSDT, ENAUSDT, ONTUSDT, DUSKUSDT, XTZUSDT |
+
+#### Adding a new symbol
+
+1. Verify it is a live Binance Futures perpetual:
+   ```bash
+   curl "https://fapi.binance.com/fapi/v1/ticker/price?symbol=NEWUSDT"
+   ```
+2. Add to `config.json` → `live_loop.symbols`
+3. Or POST at runtime (no restart needed):
+   ```bash
+   curl -X POST http://127.0.0.1:8787/api/config/symbols \
+     -H "Content-Type: application/json" \
+     -d '{"symbols": ["BTCUSDT", ..., "NEWUSDT"]}'
+   ```
 
 ### Timing
 

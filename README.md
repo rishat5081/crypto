@@ -26,7 +26,7 @@ A data-only crypto futures signal system that monitors Binance Futures markets i
 - **Adaptive Feedback Loop** - Strategy parameters auto-adjust after each trade result
 - **Live Dashboard** - Real-time monitoring with Chart.js analytics, trade history, and market news
 - **Risk Management** - Trailing stops, break-even stops, momentum reversal exits, and stagnation detection
-- **Multi-Coin Scanning** - Simultaneous monitoring of 10+ symbols across multiple timeframes
+- **Multi-Coin Scanning** - Simultaneous monitoring of 60 symbols across 5 categories (large cap, DeFi, L2, gaming, AI/infra)
 - **Loss Guard System** - Automatic cooldowns after consecutive losses with threshold tightening
 - **Performance Analytics** - Equity curve, drawdown, win rate, PnL distribution, and per-symbol breakdown
 
@@ -242,21 +242,23 @@ python -c "import json; json.load(open('config.json')); print('OK')"
 
 ## Live System Results
 
-Last live scan: **2026-03-20 09:40 UTC** — Binance Futures, 10 symbols × 2 timeframes
+Last live scan: **2026-03-25 UTC** — Binance Futures, **60 symbols × 1 timeframe (15m)**
 
-| Symbol | Price | RSI (15m) | EMA Bias | Status |
-|--------|-------|-----------|----------|--------|
-| BTC | $70,655 | 48.8 | Bullish | No crossover |
-| ETH | $2,144 | 47.6 | Bullish | No crossover |
-| SOL | $88.97 | 46.1 | Bullish | No crossover |
-| XRP | $1.449 | 46.5 | Bullish | No crossover |
-| BNB | $642.8 | 49.2 | Bullish | No crossover |
-| ADA | $0.269 | 45.9 | Bullish | No crossover |
-| DOGE | $0.094 | 47.7 | Bullish | No crossover |
-| AVAX | $9.531 | 50.3 | Bullish | No crossover |
+| Symbol | Price | Symbol | Price | Symbol | Price |
+|--------|-------|--------|-------|--------|-------|
+| BTC | $71,199 | LTC | $56.40 | UNI | $3.645 |
+| ETH | $2,171 | TRX | $0.308 | AAVE | $112.78 |
+| BNB | $646.57 | ETC | $8.639 | INJ | $3.068 |
+| XRP | $1.421 | XLM | $0.179 | OP | $0.113 |
+| SOL | $92.73 | ATOM | $1.791 | ARB | $0.098 |
+| ADA | $0.270 | ICP | $2.387 | NEAR | $1.274 |
+| DOGE | $0.098 | BCH | $477.75 | APT | $1.061 |
+| AVAX | $9.667 | ZEC | $238.42 | SUI | $0.958 |
+| DOT | $1.386 | XMR | $338.86 | HYPE | $40.18 |
+| LINK | $9.343 | YFI | $2,608 | ... | ... |
 
-> Market in **sideways consolidation** — RSI neutral (40–50), funding rates ±0.001–0.010% (healthy).
-> System correctly awaiting next EMA(21)/EMA(55) crossover before entering.
+> **60 symbols** across Large Cap, DeFi, Layer-2, Gaming/Metaverse, and AI/Infrastructure categories.
+> All verified live against Binance Futures API (2026-03-25).
 
 ---
 

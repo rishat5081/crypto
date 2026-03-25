@@ -67,13 +67,59 @@ print(signal)  # None if no setup, Signal object if triggered
 
 ## Live Market Scan
 
-The system scans 10 symbols × 2 timeframes (5m + 15m) = **20 combinations per cycle**.
+The system scans **60 symbols × 1 timeframe (15m) = 60 combinations per cycle**.
 
-### Symbols monitored
+### Symbols monitored (60 total)
 
+**Large Cap**
 ```
-XRPUSDT, SOLUSDT, ADAUSDT, BNBUSDT, BTCUSDT,
-ETHUSDT, DOGEUSDT, AVAXUSDT, DOTUSDT, LINKUSDT
+BTCUSDT, ETHUSDT, BNBUSDT, XRPUSDT, SOLUSDT, ADAUSDT, DOGEUSDT, AVAXUSDT, DOTUSDT, LINKUSDT,
+LTCUSDT, TRXUSDT, ETCUSDT, XLMUSDT, ATOMUSDT, BCHUSDT, ZECUSDT, XMRUSDT, YFIUSDT, HYPEUSDT
+```
+
+**DeFi / DEX**
+```
+UNIUSDT, AAVEUSDT, CRVUSDT, COMPUSDT, SUSHIUSDT, 1INCHUSDT, RUNEUSDT, GRTUSDT, LDOUSDT, GMXUSDT
+```
+
+**Layer-2 / Ecosystem**
+```
+OPUSDT, ARBUSDT, INJUSDT, APTUSDT, SUIUSDT, NEARUSDT, ICPUSDT, STXUSDT, IMXUSDT, FLOWUSDT
+```
+
+**Gaming / Metaverse**
+```
+MANAUSDT, SANDUSDT, GALAUSDT, AXSUSDT, ENJUSDT, CHZUSDT, GMTUSDT, APEUSDT
+```
+
+**Infrastructure / AI**
+```
+FETUSDT, FILUSDT, QNTUSDT, THETAUSDT, EGLDUSDT, CFXUSDT, WLDUSDT
+```
+
+**Other Established**
+```
+VETUSDT, ENAUSDT, ONTUSDT, DUSKUSDT, XTZUSDT
+```
+
+### Adding or removing symbols at runtime
+
+```bash
+# POST to update watchlist without restarting
+curl -X POST http://127.0.0.1:8787/api/config/symbols \
+  -H "Content-Type: application/json" \
+  -d '{"symbols": ["BTCUSDT","ETHUSDT","SOLUSDT"]}'
+
+# Or edit config.json → live_loop.symbols and restart
+```
+
+### Verifying a new symbol is active on Binance Futures
+
+```python
+import urllib.request, json
+url = "https://fapi.binance.com/fapi/v1/ticker/price?symbol=NEWUSDT"
+with urllib.request.urlopen(url) as r:
+    print(json.loads(r.read()))  # {"symbol":"NEWUSDT","price":"1.2345","time":...}
 ```
 
 ### Cycle output (JSON Lines)
