@@ -1,36 +1,32 @@
 <p align="center">
-  <h1 align="center">Crypto TP/SL Trading System</h1>
-  <p align="center">
-    Real-time cryptocurrency signal engine with adaptive TP/SL management, live dashboard, and analytics
-  </p>
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
+  <img src="https://img.shields.io/badge/Binance-Futures-F0B90B?style=for-the-badge&logo=binance&logoColor=white" />
+  <img src="https://img.shields.io/badge/Chart.js-Analytics-FF6384?style=for-the-badge&logo=chartdotjs" />
+  <img src="https://img.shields.io/badge/Trading-Paper_Only-orange?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/60_Symbols-Monitored-6E9F18?style=for-the-badge" />
+  <img src="https://img.shields.io/github/actions/workflow/status/rishat5081/crypto/ci.yml?style=for-the-badge&label=CI" />
 </p>
 
-<p align="center">
-  <a href="https://github.com/rishat5081/crypto/actions/workflows/ci.yml"><img src="https://github.com/rishat5081/crypto/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://github.com/rishat5081/crypto/actions/workflows/code-quality.yml"><img src="https://github.com/rishat5081/crypto/actions/workflows/code-quality.yml/badge.svg" alt="Code Quality"></a>
-  <img src="https://img.shields.io/badge/python-3.11%2B-blue" alt="Python 3.11+">
-  <img src="https://img.shields.io/badge/data-Binance_Futures-F0B90B?logo=binance&logoColor=white" alt="Binance">
-  <img src="https://img.shields.io/badge/trading-paper_only-orange" alt="Paper Trading">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License"></a>
-</p>
+<h1 align="center">📈 Crypto TP/SL Trading System</h1>
+<p align="center"><strong>Real-time cryptocurrency signal engine with adaptive TP/SL management, live dashboard, and analytics</strong></p>
 
 ---
 
-## Overview
+## 🌟 Overview
 
 A data-only crypto futures signal system that monitors Binance Futures markets in real-time, generates LONG/SHORT signals using technical analysis, and tracks paper trade performance with adaptive strategy tuning. No real orders are placed.
 
-### Key Features
+### 🎯 Key Features
 
-- **Multi-Strategy Signal Engine** - EMA crossover, pullback entry, and trend momentum signals
-- **Adaptive Feedback Loop** - Strategy parameters auto-adjust after each trade result
-- **Live Dashboard** - Real-time monitoring with Chart.js analytics, trade history, and market news
-- **Risk Management** - Trailing stops, break-even stops, momentum reversal exits, and stagnation detection
-- **Multi-Coin Scanning** - Simultaneous monitoring of 60 symbols across 5 categories (large cap, DeFi, L2, gaming, AI/infra)
-- **Loss Guard System** - Automatic cooldowns after consecutive losses with threshold tightening
-- **Performance Analytics** - Equity curve, drawdown, win rate, PnL distribution, and per-symbol breakdown
+- 📊 **Multi-Strategy Signal Engine** - EMA crossover, pullback entry, and trend momentum signals
+- 🔄 **Adaptive Feedback Loop** - Strategy parameters auto-adjust after each trade result
+- 🖥️ **Live Dashboard** - Real-time monitoring with Chart.js analytics, trade history, and market news
+- 🛡️ **Risk Management** - Trailing stops, break-even stops, momentum reversal exits, and stagnation detection
+- 🔍 **Multi-Coin Scanning** - Simultaneous monitoring of 60 symbols across 5 categories (large cap, DeFi, L2, gaming, AI/infra)
+- 🚨 **Loss Guard System** - Automatic cooldowns after consecutive losses with threshold tightening
+- 📈 **Performance Analytics** - Equity curve, drawdown, win rate, PnL distribution, and per-symbol breakdown
 
-## Architecture
+## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -65,22 +61,22 @@ A data-only crypto futures signal system that monitors Binance Futures markets i
 └─────────────────────────────────────────────────────┘
 ```
 
-## Tech Stack
+## 🛠️ Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| **Backend** | Python 3.11+ |
-| **Signal Engine** | Custom EMA/RSI/ATR strategy with adaptive tuning |
-| **Data Source** | Binance Futures REST API (public endpoints) |
-| **Dashboard** | Vanilla HTML/CSS/JS with Chart.js |
-| **API Server** | Python http.server |
-| **Storage** | JSON Lines (file-based) + MongoDB (optional) |
-| **ML Pipeline** | Walk-forward optimizer with logistic classifier |
-| **Deployment** | systemd service with Docker MongoDB |
+| | Component | Technology |
+|---|-----------|-----------|
+| 🐍 | **Backend** | Python 3.11+ |
+| 🧠 | **Signal Engine** | Custom EMA/RSI/ATR strategy with adaptive tuning |
+| 📡 | **Data Source** | Binance Futures REST API (public endpoints) |
+| 🖥️ | **Dashboard** | Vanilla HTML/CSS/JS with Chart.js |
+| ⚡ | **API Server** | Python http.server |
+| 💾 | **Storage** | JSON Lines (file-based) + MongoDB (optional) |
+| 🤖 | **ML Pipeline** | Walk-forward optimizer with logistic classifier |
+| 🚀 | **Deployment** | systemd service with Docker MongoDB |
 
-## Quick Start
+## ⚡ Quick Start
 
-### One Command Setup
+### 🚀 One Command Setup
 
 ```bash
 git clone https://github.com/rishat5081/crypto.git
@@ -95,7 +91,7 @@ This will:
 4. Run ML optimization on recent market data
 5. Start the live adaptive trading loop
 
-### Manual Setup
+### 🔧 Manual Setup
 
 ```bash
 # Install dependencies
@@ -112,7 +108,7 @@ cd frontend && python server.py &
 python run_live_adaptive.py --config config.json
 ```
 
-## Configuration
+## ⚙️ Configuration
 
 All configuration is in `config.json`:
 
@@ -124,7 +120,7 @@ All configuration is in `config.json`:
 | **Loss Guard** | `max_global_consecutive_losses`, `max_symbol_consecutive_losses`, pause cycles |
 | **Performance Guard** | `min_symbol_win_rate`, `rolling_window_trades`, cooldown settings |
 
-## Signal Types
+## 📡 Signal Types
 
 | Type | Trigger | Confidence |
 |------|---------|------------|
@@ -132,7 +128,7 @@ All configuration is in `config.json`:
 | **Pullback** | Price touches fast EMA in established trend | 0.92x |
 | **Momentum** | Price moving in trend direction with strong EMA separation | 0.88x |
 
-## Dashboard Sections
+## 🖥️ Dashboard Sections
 
 | Section | Description |
 |---------|-------------|
@@ -145,7 +141,7 @@ All configuration is in `config.json`:
 | **News** | Aggregated crypto market headlines |
 | **Guard** | Symbol health and adaptive retuning events |
 
-## API Endpoints
+## 🔌 API Endpoints
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -157,7 +153,7 @@ All configuration is in `config.json`:
 | GET | `/api/storage` | MongoDB connection status |
 | POST | `/api/config/symbols` | Update watchlist at runtime |
 
-## Project Structure
+## 📁 Project Structure
 
 ```
 crypto/
@@ -184,9 +180,9 @@ crypto/
 └── requirements.txt         # Python dependencies
 ```
 
-## Production Deployment
+## 🚀 Production Deployment
 
-### EC2 (One Script)
+### ☁️ EC2 (One Script)
 
 ```bash
 chmod +x deploy_ec2.sh
@@ -201,7 +197,7 @@ sudo journalctl -u crypto-trader -f
 sudo systemctl restart crypto-trader
 ```
 
-## Environment Variables
+## 🔐 Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -212,7 +208,7 @@ sudo systemctl restart crypto-trader
 | `MONGO_DB` | `crypto_trading_live` | Database name |
 | `OPTIMIZE_TIMEOUT_SEC` | `45` | ML optimizer timeout |
 
-## Testing
+## 🧪 Testing
 
 ```bash
 # Run all tests
@@ -225,7 +221,7 @@ pytest tests/ -v --cov=src --cov-report=html
 python -c "import json; json.load(open('config.json')); print('OK')"
 ```
 
-## Documentation
+## 📚 Documentation
 
 | Document | Description |
 |----------|-------------|
@@ -240,7 +236,7 @@ python -c "import json; json.load(open('config.json')); print('OK')"
 
 ---
 
-## Live System Results
+## 📊 Live System Results
 
 Last live scan: **2026-03-25 UTC** — Binance Futures, **60 symbols × 1 timeframe (15m)**
 
@@ -262,7 +258,7 @@ Last live scan: **2026-03-25 UTC** — Binance Futures, **60 symbols × 1 timefr
 
 ---
 
-## ML Performance (Walk-Forward)
+## 🤖 ML Performance (Walk-Forward)
 
 | Metric | Value |
 |--------|-------|
@@ -273,10 +269,19 @@ Last live scan: **2026-03-25 UTC** — Binance Futures, **60 symbols × 1 timefr
 
 ---
 
-## Disclaimer
+## ⚠️ Disclaimer
 
 This is a **decision-support tool** for educational and research purposes. It uses paper trading with live market data. No real orders are placed. No strategy guarantees profits. Use at your own risk. Keep API usage within exchange rate limits.
 
-## License
+## 📄 License
 
 [MIT](LICENSE)
+
+---
+
+<p align="center">
+  Built with 🐍 Python &nbsp;·&nbsp; 📈 Binance API &nbsp;·&nbsp; 📊 Chart.js &nbsp;·&nbsp; 🤖 ML Pipeline
+</p>
+<p align="center">
+  <sub>Made by <a href="https://github.com/rishat5081">@rishat5081</a></sub>
+</p>
