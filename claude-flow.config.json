@@ -1,0 +1,39 @@
+{
+  "name": "crypto",
+  "namespace": "crypto",
+  "topology": "mesh",
+  "description": "Real-time cryptocurrency signal engine with paper trading, ML optimization, and live dashboard",
+  "agents": {
+    "teamFile": ".agents/team.json",
+    "agentDocs": ".claude/agents/"
+  },
+  "routing": {
+    "rules": [
+      { "pattern": "bug-fix", "agent": "tester", "priority": "high" },
+      { "pattern": "feature", "agent": "planner", "priority": "normal" },
+      { "pattern": "security", "agent": "security-auditor", "priority": "critical" },
+      { "pattern": "testing", "agent": "tester", "priority": "normal" },
+      { "pattern": "strategy", "agent": "coder", "priority": "normal" },
+      { "pattern": "ml", "agent": "ml-developer", "priority": "normal" },
+      { "pattern": "dashboard", "agent": "coder", "priority": "normal" },
+      { "pattern": "review", "agent": "reviewer", "priority": "normal" },
+      { "pattern": "performance", "agent": "performance", "priority": "normal" },
+      { "pattern": "release", "agent": "release-manager", "priority": "normal" },
+      { "pattern": "issue", "agent": "issue-tracker", "priority": "normal" },
+      { "pattern": "quality", "agent": "code-analyzer", "priority": "normal" },
+      { "pattern": "deploy", "agent": "production-validator", "priority": "high" },
+      { "pattern": "ci", "agent": "devops", "priority": "normal" },
+      { "pattern": "architecture", "agent": "architect", "priority": "normal" }
+    ]
+  },
+  "memory": {
+    "namespace": "crypto",
+    "isolation": true,
+    "persistence": true
+  },
+  "ci": {
+    "test": "pytest tests/ -v",
+    "configValidate": "python -c \"import json; json.load(open('config.json')); print('OK')\"",
+    "importCheck": "python -c \"from src.strategy import StrategyEngine; print('OK')\""
+  }
+}

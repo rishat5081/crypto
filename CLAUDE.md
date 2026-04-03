@@ -198,6 +198,28 @@ curl "https://fapi.binance.com/fapi/v1/ticker/price?symbol=NEWUSDT"
 - Dashboard server has no auth — bind to localhost only in production
 - `requirements.txt` only has `pymongo` — pytest/flake8/mypy are dev deps
 
+## Specialized Agents
+
+This project includes 15 specialized AI agent definitions in `.claude/agents/`. Each agent has deep project-specific context for the trading engine.
+
+| Agent | Path | Purpose |
+|-------|------|---------|
+| project-owner | `.claude/agents/project-owner/` | Audits and updates all agents when the project changes |
+| coder | `.claude/agents/coder/` | Signal strategies, trade management, dashboard |
+| security-auditor | `.claude/agents/security-auditor/` | No-real-orders guarantee, API safety |
+| performance | `.claude/agents/performance/` | Loop latency, signal speed, indicator caching |
+| standards-enforcer | `.claude/agents/standards-enforcer/` | Python style, naming, project structure |
+| reviewer | `.claude/agents/reviewer/` | Trading logic correctness, safety guarantees |
+| tester | `.claude/agents/tester/` | pytest, 33 tests, mock market data |
+| architect | `.claude/agents/architect/` | Module boundaries, state management, ML integration |
+| devops | `.claude/agents/devops/` | CI/CD, EC2 deployment, config validation |
+| code-analyzer | `.claude/agents/code-analyzer/` | live_adaptive_trader.py complexity, tech debt |
+| planner | `.claude/agents/planner/` | Trading feature decomposition, dependency order |
+| production-validator | `.claude/agents/production-validator/` | Safety scan, config readiness, no debug artifacts |
+| release-manager | `.claude/agents/release-manager/` | Safety-first releases, live test results |
+| issue-tracker | `.claude/agents/issue-tracker/` | Strategy area labels, priority triage |
+| ml-developer | `.claude/agents/ml-developer/` | Walk-forward optimization, classifier tuning |
+
 ## Recent Live Test Results (March 2026)
 
 ```

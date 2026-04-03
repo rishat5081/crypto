@@ -199,3 +199,38 @@ python -c "from src.strategy import StrategyEngine; from src.trade_engine import
 | API endpoints | `frontend/app.js` polling functions |
 | Dashboard HTML structure | `frontend/styles.css` + `frontend/app.js` |
 | Models (dataclass fields) | All files that import from models.py |
+
+## Specialized Agents
+
+This project includes 15 specialized AI agent definitions in `.claude/agents/`. Each agent has deep project-specific context for the trading engine.
+
+| Agent | Path | Purpose |
+|-------|------|---------|
+| project-owner | `.claude/agents/project-owner/` | Audits and updates all agents when the project changes |
+| coder | `.claude/agents/coder/` | Signal strategies, trade management, dashboard |
+| security-auditor | `.claude/agents/security-auditor/` | No-real-orders guarantee, API safety |
+| performance | `.claude/agents/performance/` | Loop latency, signal speed, indicator caching |
+| standards-enforcer | `.claude/agents/standards-enforcer/` | Python style, naming, project structure |
+| reviewer | `.claude/agents/reviewer/` | Trading logic correctness, safety guarantees |
+| tester | `.claude/agents/tester/` | pytest, 33 tests, mock market data |
+| architect | `.claude/agents/architect/` | Module boundaries, state management, ML integration |
+| devops | `.claude/agents/devops/` | CI/CD, EC2 deployment, config validation |
+| code-analyzer | `.claude/agents/code-analyzer/` | live_adaptive_trader.py complexity, tech debt |
+| planner | `.claude/agents/planner/` | Trading feature decomposition, dependency order |
+| production-validator | `.claude/agents/production-validator/` | Safety scan, config readiness, no debug artifacts |
+| release-manager | `.claude/agents/release-manager/` | Safety-first releases, live test results |
+| issue-tracker | `.claude/agents/issue-tracker/` | Strategy area labels, priority triage |
+| ml-developer | `.claude/agents/ml-developer/` | Walk-forward optimization, classifier tuning |
+
+### Agent Usage
+
+Each agent is defined as a Markdown file at `.claude/agents/<name>/<name>.md`. They are used by the Claude-Flow orchestration system defined in `claude-flow.config.json`.
+
+**Task routing** automatically assigns work to agents based on patterns:
+- Bug fixes → `coder` (primary) + `tester` (verification)
+- New features → `architect` (design) → `coder` (implement) → `tester` (test) → `reviewer` (review)
+- Security/safety → `security-auditor` (no-real-orders guarantee)
+- Performance/latency → `performance`
+- ML/optimization → `ml-developer` + `quant-researcher`
+- Releases → `release-manager` + `production-validator`
+- CI/CD/deployment → `devops`
