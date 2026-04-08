@@ -34,10 +34,10 @@
     "min_confidence": 0.65,
     "crossover_lookback": 9,
     "ema_trend": 200,
-    "long_rsi_min": 55,
-    "long_rsi_max": 65,
-    "short_rsi_min": 28,
-    "short_rsi_max": 42
+    "long_rsi_min": 52,
+    "long_rsi_max": 68,
+    "short_rsi_min": 32,
+    "short_rsi_max": 48
   },
   "scanner": {
     "poll_seconds": 20,
