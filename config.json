@@ -16,6 +16,7 @@
     "ADAUSDT"
   ],
   "timeframes": [
+    "5m",
     "15m"
   ],
   "strategy": {
@@ -114,6 +115,7 @@
       "DUSKUSDT"
     ],
     "timeframes": [
+      "5m",
       "15m"
     ],
     "lookback_candles": 260,
