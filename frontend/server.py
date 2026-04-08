@@ -1345,6 +1345,46 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 limit = 200
             self._write_json(self.history_cache.refresh(limit=limit))
             return
+        if path == "/api/binance":
+            try:
+                from src.binance_executor import BinanceExecutor
+                import json as _json
+                config = _json.load(open(self.config_store.config_file, "r"))
+                executor = BinanceExecutor.from_env(config)
+                if not executor.enabled:
+                    self._write_json({"enabled": False, "error": "No API keys"})
+                    return
+                account = executor.get_account()
+                balance = float(account.get("totalWalletBalance", 0))
+                available = float(account.get("availableBalance", 0))
+                unrealized = float(account.get("totalUnrealizedProfit", 0))
+                positions = [
+                    {
+                        "symbol": p["symbol"],
+                        "side": "LONG" if float(p.get("positionAmt", 0)) > 0 else "SHORT",
+                        "size": abs(float(p.get("positionAmt", 0))),
+                        "entry": float(p.get("entryPrice", 0)),
+                        "pnl": float(p.get("unrealizedProfit", 0)),
+                        "margin": float(p.get("initialMargin", 0)),
+                    }
+                    for p in account.get("positions", [])
+                    if float(p.get("positionAmt", 0)) != 0
+                ]
+                self._write_json({
+                    "enabled": True,
+                    "demo": executor.demo,
+                    "balance": round(balance, 2),
+                    "available": round(available, 2),
+                    "unrealized_pnl": round(unrealized, 2),
+                    "total_equity": round(balance + unrealized, 2),
+                    "initial_balance": 5000.0,
+                    "total_pnl": round(balance + unrealized - 5000.0, 2),
+                    "open_positions": positions,
+                    "time": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception as exc:
+                self._write_json({"enabled": False, "error": str(exc)})
+            return
         if path == "/api/health":
             self._write_json({"ok": True, "time": datetime.now(timezone.utc).isoformat()})
             return

@@ -265,6 +265,7 @@ function useLiveDeskData() {
   const [selectedCoin, setSelectedCoin] = useState("ALL");
   const [watchInput, setWatchInput] = useState("");
   const [statusMessage, setStatusMessage] = useState("Control center ready.");
+  const [binance, setBinance] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,6 +374,22 @@ function useLiveDeskData() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    async function tickBinance() {
+      try {
+        const response = await fetch("/api/binance", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (cancelled) return;
+        startTransition(() => setBinance(payload));
+      } catch {}
+    }
+    tickBinance();
+    const id = window.setInterval(tickBinance, 15000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
     if (!watchInput || watchInput.trim().length < 2) return;
     const controller = new AbortController();
     const id = window.setTimeout(async () => {
@@ -451,6 +468,7 @@ function useLiveDeskData() {
     analytics,
     history,
     news,
+    binance,
     options,
     watchlistSymbols,
     symbolCatalog,
@@ -726,6 +744,35 @@ function HomePage({ desk }) {
           </motion.article>
         ))}
       </motion.section>
+
+      {desk.binance?.enabled && (
+        <motion.section className="overview-grid" {...pageMotion}>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Binance Balance</span>
+            <strong>${desk.binance.balance?.toFixed(2)}</strong>
+            <small>{desk.binance.demo ? "Demo account" : "Live account"}</small>
+          </motion.article>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Binance P&L</span>
+            <strong style={{ color: desk.binance.total_pnl >= 0 ? "#22c55e" : "#ef4444" }}>
+              {desk.binance.total_pnl >= 0 ? "+$" : "-$"}{Math.abs(desk.binance.total_pnl)?.toFixed(2)}
+            </strong>
+            <small>Since $5,000 initial</small>
+          </motion.article>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Unrealized P&L</span>
+            <strong style={{ color: desk.binance.unrealized_pnl >= 0 ? "#22c55e" : "#ef4444" }}>
+              {desk.binance.unrealized_pnl >= 0 ? "+$" : "-$"}{Math.abs(desk.binance.unrealized_pnl)?.toFixed(2)}
+            </strong>
+            <small>{desk.binance.open_positions?.length || 0} open positions</small>
+          </motion.article>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Available</span>
+            <strong>${desk.binance.available?.toFixed(2)}</strong>
+            <small>Ready to trade</small>
+          </motion.article>
+        </motion.section>
+      )}
 
       <motion.section className="feature-grid" {...pageMotion}>
         <QuickPageCard to="/trades" title="Trades" copy="See the live trade spotlight and all current opportunities." />
