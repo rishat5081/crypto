@@ -230,21 +230,10 @@ fi
 
 emit_event "BOOTSTRAP" "Environment ready"
 
-# ── Fetch live market cache ──────────────────────────────────────────
+# ── Fetch live market cache (skipped — trader fetches on demand) ──────
 sep
-log "Fetching live market cache..."
-emit_event "FETCHING_MARKET_DATA" "Fetching latest live market cache"
-
-if [ -x "$ROOT_DIR/fetch_live_cache.sh" ]; then
-  if "$ROOT_DIR/fetch_live_cache.sh" "$CACHE_DIR" 2>/dev/null; then
-    ok "Market cache updated"
-  else
-    warn "Cache fetch failed; continuing with existing data"
-    emit_event "FETCH_MARKET_DATA_FAILED" "Fetch failed, continuing with existing cache"
-  fi
-else
-  warn "fetch_live_cache.sh not found or not executable, skipping"
-fi
+log "Skipping bulk cache fetch (trader fetches live data per cycle)"
+ok "Cache step skipped"
 
 # ── ML walk-forward optimization ─────────────────────────────────────
 sep
