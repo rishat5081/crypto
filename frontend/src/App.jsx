@@ -134,7 +134,7 @@ function isTradeOpen(trade) {
   const openedAt = toEpochMs(trade.updated_at || trade.time);
   if (openedAt) {
     const tfMin = timeframeMinutes(trade.timeframe) || 15;
-    const maxOpenMs = tfMin * 4 * 60000; // max_wait_candles = 4
+    const maxOpenMs = tfMin * 2 * 60000; // expire after 2 candles on frontend
     if (Date.now() - openedAt > maxOpenMs) return false;
   }
   return true;
