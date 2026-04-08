@@ -154,42 +154,47 @@ class StrategyEngine:
         # (strong trend) and price pulls back to touch the fast EMA, enter in
         # the trend direction. This catches moves that crossover mode misses in
         # sustained trends.
+        # Requires 2-candle confirmation: current candle must confirm the bounce/rejection
+        # (not just touch the EMA). This prevents whipsaw entries.
         if not side and abs(market.funding_rate) <= self.params.funding_abs_limit:
             trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
             # Require established trend: EMA gap > 0.3%
-            if trend_strength > 0.003:
+            if trend_strength > 0.003 and len(candles) >= 3:
                 prev_close = candles[-2].close if len(candles) >= 2 else entry
+                prev2_close = candles[-3].close if len(candles) >= 3 else prev_close
                 if allow_long and ema_fast_v > ema_slow_v:
                     # Bullish trend: price pulled back near fast EMA and bounced
                     touch_dist = abs(candles[-1].low - ema_fast_v) / atr_v if atr_v else 999
                     bounced = entry > ema_fast_v and prev_close <= ema_fast_v * 1.002
-                    if (touch_dist < 1.2 or bounced) and self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
+                    # 2-candle confirmation: previous candle must have come from below/near EMA
+                    confirmed = prev_close > prev2_close and entry > prev_close
+                    if (touch_dist < 1.0 or bounced) and confirmed and self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
                         side = "LONG"
                         signal_type = "PULLBACK"
                 elif allow_short and ema_fast_v < ema_slow_v:
                     # Bearish trend: price pulled back near fast EMA and rejected
                     touch_dist = abs(candles[-1].high - ema_fast_v) / atr_v if atr_v else 999
                     rejected = entry < ema_fast_v and prev_close >= ema_fast_v * 0.998
-                    if (touch_dist < 1.2 or rejected) and self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max:
+                    # 2-candle confirmation: previous candle must have come from above/near EMA
+                    confirmed = prev_close < prev2_close and entry < prev_close
+                    if (touch_dist < 1.0 or rejected) and confirmed and self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max:
                         side = "SHORT"
                         signal_type = "PULLBACK"
 
-        # Trend momentum entry: price is moving strongly in trend direction
-        # (below fast EMA for SHORT, above for LONG) with good RSI alignment.
-        # This enters during trend continuation without requiring a pullback.
-        if not side and abs(market.funding_rate) <= self.params.funding_abs_limit:
-            trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
-            if trend_strength > 0.004:
-                if allow_short and ema_fast_v < ema_slow_v and entry < ema_fast_v:
-                    # Strong bearish: price below fast EMA, trending down
-                    if self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max:
-                        side = "SHORT"
-                        signal_type = "MOMENTUM"
-                elif allow_long and ema_fast_v > ema_slow_v and entry > ema_fast_v:
-                    # Strong bullish: price above fast EMA, trending up
-                    if self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
-                        side = "LONG"
-                        signal_type = "MOMENTUM"
+        # Trend momentum entry: DISABLED — historical data shows 0% win rate.
+        # Momentum entries chase price too late and get whipsawed.
+        # Keeping code commented for future re-evaluation with better filters.
+        # if not side and abs(market.funding_rate) <= self.params.funding_abs_limit:
+        #     trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
+        #     if trend_strength > 0.004:
+        #         if allow_short and ema_fast_v < ema_slow_v and entry < ema_fast_v:
+        #             if self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max:
+        #                 side = "SHORT"
+        #                 signal_type = "MOMENTUM"
+        #         elif allow_long and ema_fast_v > ema_slow_v and entry > ema_fast_v:
+        #             if self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
+        #                 side = "LONG"
+        #                 signal_type = "MOMENTUM"
 
         if not side:
             return None
@@ -238,9 +243,7 @@ class StrategyEngine:
         )
         # Non-crossover entries get confidence discounts
         if signal_type == "PULLBACK":
-            confidence *= 0.88  # tightened from 0.92 — pullbacks need stronger base conviction
-        elif signal_type == "MOMENTUM":
-            confidence *= 0.82  # tightened from 0.85 — least reliable signal type
+            confidence *= 0.85  # tightened — pullbacks need stronger base conviction
         confidence = max(0.0, min(confidence, 0.99))
 
         if confidence < self.params.min_confidence:

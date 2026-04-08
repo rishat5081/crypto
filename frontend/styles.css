@@ -134,9 +134,17 @@ h1 {
   font-size: 13px;
 }
 
+.hero-subtitle {
+  margin: 0 0 10px;
+  max-width: 600px;
+  color: #d7e7fb;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
 .grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 14px;
 }
 
@@ -224,13 +232,14 @@ h1 {
 .signal-main {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 
 .pair {
   margin: 0;
-  font-size: 34px;
+  font-size: clamp(32px, 5vw, 52px);
   font-weight: 800;
   letter-spacing: -0.02em;
 }
@@ -271,6 +280,149 @@ h1 {
   font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
   font-size: 16px;
   font-weight: 600;
+}
+
+.compact-grid strong {
+  font-size: 15px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #8adfff;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.trade-focus-card {
+  padding: 22px;
+  background:
+    radial-gradient(700px 280px at 0% 0%, rgba(66, 210, 255, 0.12), transparent 60%),
+    radial-gradient(520px 240px at 100% 0%, rgba(93, 255, 184, 0.14), transparent 58%),
+    linear-gradient(165deg, rgba(12, 23, 38, 0.95) 0%, rgba(10, 18, 30, 0.98) 100%);
+}
+
+.trade-focus-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+
+.focus-status-line {
+  margin: 0;
+  color: #d9ebff;
+  font-size: 15px;
+}
+
+.focus-price-box {
+  min-width: 180px;
+  border: 1px solid rgba(106, 174, 255, 0.28);
+  border-radius: 16px;
+  padding: 14px 16px;
+  background: rgba(8, 15, 24, 0.7);
+  display: grid;
+  gap: 6px;
+}
+
+.focus-price-box span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.focus-price-box strong {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: clamp(22px, 3vw, 30px);
+  color: #f0f7ff;
+}
+
+.trade-focus-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.focus-metric,
+.trade-rail > div,
+.trade-reason-box {
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  padding: 12px 14px;
+  background: rgba(7, 13, 22, 0.64);
+  display: grid;
+  gap: 6px;
+}
+
+.focus-metric span,
+.trade-rail span,
+.trade-reason-box span,
+.summary-bar-label span {
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.focus-metric strong,
+.trade-rail strong,
+.trade-reason-box strong,
+.summary-bar-label strong {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  color: #f0f7ff;
+}
+
+.focus-metric strong,
+.trade-rail strong {
+  font-size: 18px;
+}
+
+.trade-rail {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.trade-reason-box strong {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.result-summary {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.result-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.result-main strong {
+  font-family: "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  font-size: 24px;
+  color: #f0f7ff;
+}
+
+.summary-bar-block {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.summary-bar-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
 
 .control-grid {
@@ -398,6 +550,10 @@ td {
 
 tbody tr:hover {
   background: rgba(86, 138, 184, 0.12);
+}
+
+tbody tr:nth-child(even) {
+  background: rgba(12, 18, 29, 0.26);
 }
 
 .side-pill {
@@ -543,9 +699,10 @@ tbody tr:hover {
 
 .system-log-table-wrap td:nth-child(4) {
   max-width: 520px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.45;
 }
 
 .news-card .btn-primary {
@@ -780,11 +937,16 @@ tbody tr:hover {
 
 @media (max-width: 980px) {
   .grid {
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: 1fr;
   }
 
   .category-cards {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .trade-focus-metrics,
+  .trade-rail {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 
@@ -807,6 +969,27 @@ tbody tr:hover {
 
   table {
     min-width: 560px;
+  }
+
+  .trade-focus-card {
+    padding: 18px;
+  }
+
+  .trade-focus-top,
+  .result-main,
+  .summary-bar-label {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .focus-price-box {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .trade-focus-metrics,
+  .trade-rail {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -831,22 +1014,22 @@ tbody tr:hover {
 
 .section-tab {
   border: 1px solid transparent;
-  border-radius: 9px;
-  padding: 6px 14px;
+  border-radius: 999px;
+  padding: 9px 14px;
   font: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  color: var(--muted);
-  background: transparent;
+  color: #d9e8fb;
+  background: rgba(11, 18, 30, 0.72);
   cursor: pointer;
   transition: all 150ms ease;
 }
 
 .section-tab:hover {
   color: var(--text);
-  background: rgba(66, 210, 255, 0.07);
-  border-color: var(--line-soft);
+  background: rgba(13, 25, 40, 0.88);
+  border-color: rgba(66, 210, 255, 0.34);
 }
 
 .section-tab.active {

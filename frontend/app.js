@@ -375,29 +375,53 @@ function renderState(state) {
   setText("connection", `Last update: ${fmtTime(state.generated_at)} | View: ${coinLabel}`);
 
   const open = filteredTrade(state.open_trade) || {};
-  setText("pair", open.symbol || `No active trade (${coinLabel})`);
-  setText("signal_state", open.signal_state || "NONE");
-  setText("signal_time", fmtTime(open.updated_at || open.time));
-  setText("timeframe", open.timeframe || "-");
-  setText("entry", fmtNumber(open.entry, 6));
-  setText("tp", fmtNumber(open.take_profit, 6));
-  setText("sl", fmtNumber(open.stop_loss, 6));
-  setText("confidence", fmtPercent(open.confidence));
-  setText("score", fmtNumber(open.score, 4));
+  const possibleTrades = Array.isArray(state.possible_trades) ? state.possible_trades : [];
+  const focusTrade = open.symbol ? open : (filteredPossibleTrades(possibleTrades)[0] || {});
+  const focusSymbol = focusTrade.symbol || open.symbol || "";
+  const marketRows = Array.isArray(state.market) ? state.market : [];
+  const marketMatch = marketRows.find((row) => row && row.symbol === focusSymbol) || null;
+  const focusLabel = open.symbol ? "Live Trade" : focusTrade.symbol ? "Best Live Setup" : "Scanning";
+  const focusStatusLine = open.symbol
+    ? `${focusTrade.symbol} is currently open and being monitored live.`
+    : focusTrade.symbol
+      ? `No open trade yet. This is the clearest live candidate on the board.`
+      : `No active trade or qualified setup for ${coinLabel} right now.`;
+
+  setText("focus_label", focusLabel);
+  setText("focus_label_repeat", focusLabel);
+  setText("focus_status_line", focusStatusLine);
+  setText("focus_market_price", marketMatch ? fmtNumber(marketMatch.price, Number(marketMatch.price) > 100 ? 2 : 6) : "-");
+  setText("focus_market_price_repeat", marketMatch ? fmtNumber(marketMatch.price, Number(marketMatch.price) > 100 ? 2 : 6) : "-");
+  setText("focus_reason", focusTrade.reason || "Waiting for the next qualifying trade explanation.");
+
+  setText("pair", focusTrade.symbol || `No active trade (${coinLabel})`);
+  setText("signal_state", focusTrade.signal_state || (open.symbol ? "LIVE" : focusTrade.symbol ? "SETUP" : "NONE"));
+  setText("detail_signal_state", open.signal_state || "NONE");
+  setText("signal_time", fmtTime(focusTrade.updated_at || focusTrade.time));
+  setText("timeframe", focusTrade.timeframe || "-");
+  setText("entry", fmtNumber(focusTrade.entry, 6));
+  setText("tp", fmtNumber(focusTrade.take_profit, 6));
+  setText("sl", fmtNumber(focusTrade.stop_loss, 6));
+  setText("confidence", fmtPercent(focusTrade.confidence));
+  setText("score", fmtNumber(focusTrade.score, 4));
 
   // Extra active trade fields
-  const rrVal = Number.isFinite(+open.rr) && open.rr
-    ? fmtNumber(open.rr, 3)
-    : (Number.isFinite(+open.entry) && Number.isFinite(+open.take_profit) && Number.isFinite(+open.stop_loss) && +open.entry !== +open.stop_loss
-        ? fmtNumber(Math.abs(+open.take_profit - +open.entry) / Math.abs(+open.entry - +open.stop_loss), 3)
+  const rrVal = Number.isFinite(+focusTrade.rr) && focusTrade.rr
+    ? fmtNumber(focusTrade.rr, 3)
+    : (Number.isFinite(+focusTrade.entry) && Number.isFinite(+focusTrade.take_profit) && Number.isFinite(+focusTrade.stop_loss) && +focusTrade.entry !== +focusTrade.stop_loss
+        ? fmtNumber(Math.abs(+focusTrade.take_profit - +focusTrade.entry) / Math.abs(+focusTrade.entry - +focusTrade.stop_loss), 3)
         : "-");
   setText("open_rr", rrVal);
-  setText("open_win_prob", fmtPercent(open.win_probability));
-  setText("open_ev", fmtNumber(open.expectancy_r, 4));
+  setText("detail_open_rr", open.symbol ? rrVal : "-");
+  setText("open_win_prob", fmtPercent(focusTrade.win_probability));
+  setText("detail_open_win_prob", fmtPercent(open.win_probability));
+  setText("open_ev", fmtNumber(focusTrade.expectancy_r, 4));
+  setText("detail_open_ev", fmtNumber(open.expectancy_r, 4));
+  setText("focus_score_repeat", fmtNumber(focusTrade.score, 4));
 
   const sideEl = document.getElementById("side");
   if (sideEl) {
-    const side = (open.side || "-").toUpperCase();
+    const side = (focusTrade.side || "-").toUpperCase();
     sideEl.textContent = side;
     sideEl.classList.remove("long", "short");
     if (side === "LONG") sideEl.classList.add("long");
@@ -413,6 +437,17 @@ function renderState(state) {
   setText("last_pnl_r", fmtNumber(last.pnl_r, 4));
   setText("last_pnl_usd", fmtNumber(last.pnl_usd, 4));
   setText("last_closed", last.closed_at_ms ? new Date(last.closed_at_ms).toLocaleString() : "-");
+  setText("last_reason", last.reason || "Waiting for first completed trade...");
+
+  const lastBadgeEl = document.getElementById("last_result_badge");
+  if (lastBadgeEl) {
+    const resultText = String(last.result || "-");
+    const upper = resultText.toUpperCase();
+    lastBadgeEl.textContent = resultText;
+    lastBadgeEl.className = "result-pill";
+    if (upper.includes("WIN") || upper.startsWith("TP")) lastBadgeEl.classList.add("result-win");
+    if (upper.includes("LOSS") || upper.startsWith("SL")) lastBadgeEl.classList.add("result-loss");
+  }
 
   const summary = state.summary || {};
   setText("status", state.status || "-");
@@ -430,6 +465,7 @@ function renderState(state) {
   const wr = Number(summary.win_rate || 0);
   const bar = document.getElementById("win_rate_bar");
   if (bar) bar.style.width = `${(wr * 100).toFixed(1)}%`;
+  setText("win_rate_label", fmtPercent(summary.win_rate));
 
   renderPossibleRows(
     state.possible_trades || [],

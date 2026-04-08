@@ -11,6 +11,7 @@ from email.utils import parsedate_to_datetime
 from hashlib import sha1
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
+import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.error import URLError
@@ -98,7 +99,7 @@ class MongoStore:
         self.config_snapshots.create_index([("saved_at", DESCENDING)])
 
     def _upsert_metadata(self) -> None:
-        if not self.db:
+        if self.db is None:
             return
         meta = self.db["metadata"]
         meta.update_one(
@@ -692,7 +693,7 @@ class TradeHistoryCache:
     def refresh(self, limit: int = 200) -> Dict[str, Any]:
         with self._lock:
             if not self.history_file.exists():
-                if self.mongo_store:
+                if self.mongo_store and self.mongo_store.available:
                     return self.mongo_store.fetch_trade_history(limit=limit, source_file=str(self.history_file))
                 return {
                     "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -732,7 +733,7 @@ class TradeHistoryCache:
                         self.mongo_store.persist_trade_result(event, source=str(self.history_file))
                 self._position = fp.tell()
 
-            if self.mongo_store:
+            if self.mongo_store and self.mongo_store.available:
                 return self.mongo_store.fetch_trade_history(limit=limit, source_file=str(self.history_file))
 
             size = max(1, min(int(limit), self.max_items))
@@ -1356,6 +1357,10 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path == "/api/analytics":
             self._write_json(self.analytics_engine.compute())
             return
+        if path != "/":
+            requested = Path(self.directory) / path.lstrip("/")
+            if not requested.exists() and "." not in Path(path).name:
+              self.path = "/index.html"
         super().do_GET()
 
     def do_POST(self) -> None:

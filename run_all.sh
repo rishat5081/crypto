@@ -8,6 +8,8 @@ OS_NAME="$(uname -s)"
 PYTHON_CMD=""
 
 FRONTEND_DIR="$ROOT_DIR/frontend"
+FRONTEND_STATIC_DIR="$FRONTEND_DIR"
+FRONTEND_NPM_LOG="/tmp/crypto_frontend_npm.log"
 EVENTS_FILE="$ROOT_DIR/data/live_events.jsonl"
 HISTORY_EVENTS_FILE="$ROOT_DIR/data/live_events_history.jsonl"
 RUNTIME_CONTROL_FILE="$ROOT_DIR/data/runtime_control.json"
@@ -218,6 +220,42 @@ ensure_venv_and_deps() {
   fi
 }
 
+build_frontend() {
+  if [ "$START_FRONTEND" != "1" ]; then
+    return
+  fi
+
+  if [ ! -f "$FRONTEND_DIR/package.json" ]; then
+    FRONTEND_STATIC_DIR="$FRONTEND_DIR"
+    return
+  fi
+
+  if ! have_cmd npm; then
+    log "npm is required to build the frontend but was not found in PATH"
+    exit 1
+  fi
+
+  : > "$FRONTEND_NPM_LOG"
+  log "Installing frontend dependencies"
+  (
+    cd "$FRONTEND_DIR"
+    npm install
+  ) >>"$FRONTEND_NPM_LOG" 2>&1
+
+  log "Building frontend assets"
+  (
+    cd "$FRONTEND_DIR"
+    npm run build
+  ) >>"$FRONTEND_NPM_LOG" 2>&1
+
+  if [ ! -f "$FRONTEND_DIR/dist/index.html" ]; then
+    log "Frontend build did not produce dist/index.html. Check $FRONTEND_NPM_LOG"
+    exit 1
+  fi
+
+  FRONTEND_STATIC_DIR="$FRONTEND_DIR/dist"
+}
+
 start_frontend() {
   if [ "$START_FRONTEND" != "1" ]; then
     log "Frontend startup disabled (START_FRONTEND=$START_FRONTEND)"
@@ -227,6 +265,12 @@ start_frontend() {
   if [ ! -f "$FRONTEND_DIR/server.py" ]; then
     log "Frontend server not found at $FRONTEND_DIR/server.py"
     return
+  fi
+
+  if [ -f "$FRONTEND_DIR/dist/index.html" ]; then
+    FRONTEND_STATIC_DIR="$FRONTEND_DIR/dist"
+  else
+    FRONTEND_STATIC_DIR="$FRONTEND_DIR"
   fi
 
   mkdir -p "$(dirname "$EVENTS_FILE")"
@@ -248,7 +292,7 @@ start_frontend() {
     --mongo-uri "$MONGO_URI" \
     --mongo-db "$MONGO_DB" \
     --mongo-required "$MONGO_REQUIRED" \
-    --static-dir "$FRONTEND_DIR" \
+    --static-dir "$FRONTEND_STATIC_DIR" \
     >/tmp/crypto_frontend.log 2>&1 &
 
   FRONTEND_PID=$!
@@ -378,6 +422,7 @@ main() {
   stop_existing_processes
   ensure_python
   ensure_venv_and_deps
+  build_frontend
   start_frontend
   emit_event "BOOTSTRAP" "Preparing environment"
   emit_event "BOOTSTRAP_DONE" "Environment ready"
@@ -400,7 +445,7 @@ main() {
 
   log "Starting live adaptive paper-trading loop"
   emit_event "LIVE_TRADING" "Live adaptive paper-trading started"
-  python -u "$ROOT_DIR/run_live_adaptive.py" --config "$ROOT_DIR/config.json" | tee -a "$EVENTS_FILE" "$HISTORY_EVENTS_FILE"
+  python -u "$ROOT_DIR/run_live_adaptive.py" --config "$ROOT_DIR/config.json" --continuous | tee -a "$EVENTS_FILE" "$HISTORY_EVENTS_FILE"
 }
 
 main "$@"

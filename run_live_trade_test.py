@@ -39,9 +39,19 @@ def current_r_multiple(side: str, entry: float, stop_loss: float, price: float) 
 
 
 class LiveTradeTest:
-    def __init__(self, config: Dict, target_trades: int = 20):
+    def __init__(
+        self,
+        config: Dict,
+        target_trades: int = 20,
+        symbols_override: Optional[List[str]] = None,
+        timeframes_override: Optional[List[str]] = None,
+        poll_seconds_override: Optional[int] = None,
+        max_wait_minutes_override: Optional[int] = None,
+        output_path: str = "data/live_trade_test_results.json",
+    ):
         self.config = config
         self.target_trades = target_trades
+        self.output_path = Path(output_path)
 
         self.client = BinanceFuturesRestClient()
         self.strategy_payload = copy.deepcopy(config["strategy"])
@@ -63,6 +73,14 @@ class LiveTradeTest:
         self.lookback = int(live_cfg.get("lookback_candles", 260))
         self.poll_seconds = int(live_cfg.get("poll_seconds", 12))
         self.max_wait_minutes = int(live_cfg.get("max_wait_minutes_per_trade", 4))
+        if symbols_override:
+            self.symbols = symbols_override
+        if timeframes_override:
+            self.timeframes = timeframes_override
+        if poll_seconds_override is not None:
+            self.poll_seconds = int(poll_seconds_override)
+        if max_wait_minutes_override is not None:
+            self.max_wait_minutes = int(max_wait_minutes_override)
 
         # Execution thresholds — start with candidate-level (relaxed) to collect data
         self.min_confidence = 0.68
@@ -534,9 +552,8 @@ class LiveTradeTest:
         sys.stdout.flush()
 
         # Save results to file
-        output_path = Path("data/live_trade_test_results.json")
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        with output_path.open("w", encoding="utf-8") as f:
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+        with self.output_path.open("w", encoding="utf-8") as f:
             json.dump({
                 "completed_at": now_iso(),
                 "analysis": analysis,
@@ -550,7 +567,7 @@ class LiveTradeTest:
                     "symbols": self.symbols,
                 },
             }, f, indent=2)
-        print(f"\n  Results saved to {output_path}")
+        print(f"\n  Results saved to {self.output_path}")
 
         return analysis
 
@@ -559,10 +576,25 @@ def main():
     parser = argparse.ArgumentParser(description="Live trade test with self-tuning")
     parser.add_argument("--trades", type=int, default=20, help="Number of trades to complete")
     parser.add_argument("--config", default="config.json", help="Path to config.json")
+    parser.add_argument("--symbols", default="", help="Comma-separated symbol override")
+    parser.add_argument("--timeframes", default="", help="Comma-separated timeframe override")
+    parser.add_argument("--poll-seconds", type=int, default=None, help="Override scan poll interval")
+    parser.add_argument("--max-wait-minutes", type=int, default=None, help="Override max wait per trade")
+    parser.add_argument("--output", default="data/live_trade_test_results.json", help="Path to results JSON")
     args = parser.parse_args()
 
     config = load_config(args.config)
-    tester = LiveTradeTest(config, target_trades=args.trades)
+    symbols_override = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
+    timeframes_override = [tf.strip() for tf in args.timeframes.split(",") if tf.strip()]
+    tester = LiveTradeTest(
+        config,
+        target_trades=args.trades,
+        symbols_override=symbols_override or None,
+        timeframes_override=timeframes_override or None,
+        poll_seconds_override=args.poll_seconds,
+        max_wait_minutes_override=args.max_wait_minutes,
+        output_path=args.output,
+    )
     tester.run()
 
 
