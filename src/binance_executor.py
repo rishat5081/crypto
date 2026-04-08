@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import json
 import logging
 import os
 import time
@@ -75,8 +74,6 @@ class BinanceExecutor:
         api_key = os.getenv("BINANCE_API_KEY", "")
         secret_key = os.getenv("BINANCE_SECRET_KEY", "")
         demo = os.getenv("BINANCE_DEMO", "1") == "1"
-
-        risk_pct = float(config.get("account", {}).get("risk_per_trade_pct", 0.02))
 
         # Use actual account balance for position sizing
         executor = cls(
