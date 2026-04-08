@@ -199,6 +199,34 @@ class StrategyEngine:
         if not side:
             return None
 
+        # Volume confirmation: require current candle volume above
+        # the recent average. Low-volume entries get whipsawed.
+        if len(candles) >= 20:
+            recent_vols = [c.volume for c in candles[-20:]]
+            avg_vol = sum(recent_vols) / len(recent_vols)
+            if last.volume < avg_vol * 0.8:
+                return None
+
+        # Candle body confirmation: entry candle must close in
+        # the trade direction. Avoids entering on doji/reversal candles.
+        if side == "LONG" and last.close <= last.open:
+            return None
+        if side == "SHORT" and last.close >= last.open:
+            return None
+
+        # 3-candle momentum: at least 2 of last 3 candles should
+        # close in the trade direction. Confirms sustained pressure.
+        if len(candles) >= 3:
+            last3 = candles[-3:]
+            if side == "LONG":
+                bullish = sum(1 for c in last3 if c.close > c.open)
+                if bullish < 2:
+                    return None
+            else:
+                bearish = sum(1 for c in last3 if c.close < c.open)
+                if bearish < 2:
+                    return None
+
         sl_distance = atr_v * self.params.atr_multiplier
         if side == "LONG":
             stop_loss = entry - sl_distance
