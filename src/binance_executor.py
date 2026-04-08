@@ -146,6 +146,7 @@ class BinanceExecutor:
                     "minNotional": float(
                         filters.get("MIN_NOTIONAL", {}).get("notional", 5)
                     ),
+                    "tickSize": float(filters.get("PRICE_FILTER", {}).get("tickSize", 0.01)),
                 }
             logger.info("Loaded exchange info for %d symbols", len(self._exchange_info))
         except Exception as exc:
@@ -158,6 +159,7 @@ class BinanceExecutor:
             "minQty": 0.001,
             "stepSize": 0.001,
             "minNotional": 5,
+            "tickSize": 0.01,
         })
 
     def _round_quantity(self, symbol: str, qty: float) -> float:
@@ -168,7 +170,12 @@ class BinanceExecutor:
         return max(rounded, info["minQty"])
 
     def _round_price(self, symbol: str, price: float) -> float:
-        precision = self._get_precision(symbol)["pricePrecision"]
+        info = self._get_precision(symbol)
+        tick = info.get("tickSize", 0.01)
+        if tick > 0:
+            price = round(price - (price % tick), 10)
+        # Also respect pricePrecision
+        precision = info["pricePrecision"]
         return round(price, precision)
 
     # ── Account info ─────────────────────────────────────────────────
