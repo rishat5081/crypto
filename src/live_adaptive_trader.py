@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from .alerts import play_trade_alert
+from .binance_executor import BinanceExecutor
 from .binance_futures_rest import BinanceFuturesRestClient
 from .indicators import ema
 from .ml_pipeline import MLWalkForwardOptimizer
@@ -38,6 +39,9 @@ class LiveAdaptivePaperTrader:
             force_mock=bool(ds.get("force_mock", False)),
             mock_seed=int(ds.get("mock_seed", 42)),
         )
+
+        # Binance order executor (demo or live)
+        self.executor = BinanceExecutor.from_env(config)
 
         self.strategy_payload = copy.deepcopy(config["strategy"])
         self.base_strategy = StrategyEngine.from_dict(copy.deepcopy(config["strategy"]))
@@ -1154,7 +1158,47 @@ class LiveAdaptivePaperTrader:
                 )
             )
 
+            # Execute on Binance (demo or live)
+            exec_result = {"executed": False}
+            if self.executor.enabled:
+                exec_result = self.executor.open_trade(
+                    symbol=selected.signal.symbol,
+                    side=selected.signal.side,
+                    entry_price=selected.signal.entry,
+                    stop_loss=selected.signal.stop_loss,
+                    take_profit=selected.signal.take_profit,
+                )
+                print(
+                    json.dumps({
+                        "type": "BINANCE_ORDER",
+                        "time": self._now_iso(),
+                        "action": "OPEN",
+                        "symbol": selected.signal.symbol,
+                        "side": selected.signal.side,
+                        "result": exec_result,
+                    })
+                )
+
             closed = self._wait_for_close(selected.signal)
+
+            # Close position on Binance
+            if self.executor.enabled and exec_result.get("executed"):
+                close_result = self.executor.close_trade(
+                    symbol=closed.symbol,
+                    side=closed.side,
+                    reason=closed.reason,
+                )
+                print(
+                    json.dumps({
+                        "type": "BINANCE_ORDER",
+                        "time": self._now_iso(),
+                        "action": "CLOSE",
+                        "symbol": closed.symbol,
+                        "side": closed.side,
+                        "result": close_result,
+                    })
+                )
+
             self._record_trade(closed)
             self._apply_feedback(closed)
             self._apply_loss_guard(closed, cycles)
@@ -1168,6 +1212,7 @@ class LiveAdaptivePaperTrader:
                         "cycle": cycles,
                         "trade": asdict(closed),
                         "summary": self._summary(),
+                        "binance_executed": exec_result.get("executed", False),
                     }
                 )
             )

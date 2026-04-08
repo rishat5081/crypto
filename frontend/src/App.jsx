@@ -930,30 +930,55 @@ function HistoryPage({ desk }) {
           ))}
         </div>
       </div>
-      <div className="history-grid">
-        {filteredHistory.map((trade) => (
-          <motion.article key={`${trade.trade_key || trade.event_time || trade.symbol}`} className="history-card" whileHover={{ y: -4 }}>
-            <div className="history-top">
-              <strong>{trade.symbol}</strong>
-              <span className={`result-chip ${resultTone(trade.result)}`}>{trade.result || "Unknown"}</span>
-            </div>
-            <div className="history-row">
-              <span>{trade.side}</span>
-              <span>{trade.timeframe}</span>
-            </div>
-            <div className="history-row">
-              <span>Opened: {trade.opened_at_ms ? fmtTime(trade.opened_at_ms) : "—"}</span>
-              <span>Closed: {fmtTime(getTradeCloseMs(trade))}</span>
-            </div>
-            <div className="history-metrics">
-              <Stat label="Entry" value={formatPrice(trade.entry)} />
-              <Stat label="Exit" value={formatPrice(trade.exit_price)} />
-              <Stat label="PnL (R)" value={fmtNumber(trade.pnl_r, 3)} />
-              <Stat label="PnL (USD)" value={fmtNumber(trade.pnl_usd, 3)} />
-            </div>
-          </motion.article>
-        ))}
-        {!filteredHistory.length && <div className="feature-panel empty-panel">No completed trades are stored yet.</div>}
+      <div className="feature-panel" style={{ overflowX: "auto" }}>
+        <table className="history-table">
+          <thead>
+            <tr>
+              <th>Opened</th>
+              <th>Closed</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>TF</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Result</th>
+              <th>Reason</th>
+              <th>PnL (R)</th>
+              <th>PnL ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredHistory.map((trade) => {
+              const exitReason = (() => {
+                const r = (trade.reason || "").toUpperCase();
+                if (r.includes("ADVERSE_CUT")) return "Adverse Cut";
+                if (r.includes("STAGNATION")) return "Stagnation";
+                if (r.includes("MOMENTUM_REVERSAL")) return "Momentum Rev.";
+                if (r.includes("TIMEOUT")) return "Timeout";
+                if (trade.result === "WIN") return "TP Hit";
+                if (trade.result === "LOSS") return "SL Hit";
+                return trade.reason ? trade.reason.split("|")[0].trim() : "—";
+              })();
+              const pnlColor = (trade.pnl_r || 0) > 0 ? "#22c55e" : (trade.pnl_r || 0) < 0 ? "#ef4444" : "#94a3b8";
+              return (
+                <tr key={`${trade.trade_key || trade.event_time || trade.symbol}-${trade.closed_at_ms}`}>
+                  <td>{trade.opened_at_ms ? fmtTime(trade.opened_at_ms) : "—"}</td>
+                  <td>{fmtTime(getTradeCloseMs(trade))}</td>
+                  <td><strong>{trade.symbol}</strong></td>
+                  <td><span className={`tone-pill compact ${sideTone(trade.side)}`}>{trade.side}</span></td>
+                  <td>{trade.timeframe}</td>
+                  <td>{formatPrice(trade.entry)}</td>
+                  <td>{formatPrice(trade.exit_price)}</td>
+                  <td><span className={`result-chip ${resultTone(trade.result)}`}>{trade.result}</span></td>
+                  <td className="reason-cell">{exitReason}</td>
+                  <td style={{ color: pnlColor, fontWeight: 600 }}>{trade.pnl_r != null ? (trade.pnl_r >= 0 ? "+" : "") + trade.pnl_r.toFixed(3) : "—"}</td>
+                  <td style={{ color: pnlColor }}>{trade.pnl_usd != null ? (trade.pnl_usd >= 0 ? "+$" : "-$") + Math.abs(trade.pnl_usd).toFixed(3) : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!filteredHistory.length && <div className="empty-panel" style={{ padding: "2rem", textAlign: "center" }}>No completed trades are stored yet.</div>}
       </div>
     </PageWrap>
   );
