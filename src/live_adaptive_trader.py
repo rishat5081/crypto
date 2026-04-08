@@ -651,6 +651,14 @@ class LiveAdaptivePaperTrader:
             )
 
         while True:
+            # Hard time-based safety timeout FIRST (before any API calls)
+            if time.time() - start >= max_wait_seconds:
+                active = engine.active_trade
+                if active:
+                    latest = (last_known_candles or candles)[-1] if last_known_candles else None
+                    if latest:
+                        return _make_exit(active, latest, "TIMEOUT_EXIT")
+
             # Network error protection: wrap klines fetch in try/except
             try:
                 candles = self.client.fetch_klines(symbol=signal.symbol, interval=signal.timeframe, limit=10)
@@ -803,16 +811,6 @@ class LiveAdaptivePaperTrader:
                     # Candle-count based timeout
                     if bars_seen >= self.max_wait_candles:
                         return _make_exit(active, latest, "CANDLE_TIMEOUT")
-
-            # Hard time-based safety timeout (fallback)
-            if time.time() - start >= max_wait_seconds:
-                now_ms = int(time.time() * 1000)
-                completed = [c for c in candles if c.close_time_ms < now_ms]
-                latest = completed[-1] if completed else candles[-1]
-                active = engine.active_trade
-                if active is None:
-                    raise RuntimeError("Active trade missing during timeout close")
-                return _make_exit(active, latest, "TIMEOUT_EXIT")
 
             time.sleep(self.poll_seconds)
 
