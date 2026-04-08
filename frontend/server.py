@@ -546,6 +546,24 @@ class EventStateCache:
             self._state["possible_probability_categories"] = cats if isinstance(cats, dict) else {}
             return
 
+        if event_type == "BINANCE_ORDER":
+            action = event.get("action")
+            result = event.get("result") or {}
+            open_trade = self._state.get("open_trade") or {}
+            if action == "OPEN" and open_trade:
+                open_trade["binance_executed"] = result.get("executed", False)
+                open_trade["binance_order_id"] = result.get("order_id")
+                open_trade["binance_entry_price"] = result.get("entry_price")
+                open_trade["binance_quantity"] = result.get("quantity")
+                open_trade["binance_notional"] = result.get("notional")
+                open_trade["binance_status"] = result.get("status")
+                self._state["open_trade"] = open_trade
+            elif action == "CLOSE":
+                if open_trade:
+                    open_trade["binance_close_status"] = result.get("status")
+                    self._state["open_trade"] = open_trade
+            return
+
         if event_type in {"SYMBOL_COOLDOWN_APPLIED", "SYMBOL_COOLDOWN_CLEARED", "GUARD_RETUNE"}:
             self._state["guard_event"] = event
             return
@@ -678,6 +696,7 @@ class TradeHistoryCache:
             "pnl_r": trade.get("pnl_r"),
             "pnl_usd": trade.get("pnl_usd"),
             "reason": trade.get("reason"),
+            "binance_executed": event.get("binance_executed", False),
         }
 
     def _append(self, event: Dict[str, Any], trade: Dict[str, Any]) -> None:

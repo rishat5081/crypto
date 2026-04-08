@@ -76,18 +76,28 @@ class BinanceExecutor:
         secret_key = os.getenv("BINANCE_SECRET_KEY", "")
         demo = os.getenv("BINANCE_DEMO", "1") == "1"
 
-        account = config.get("account", {})
-        balance = float(account.get("starting_balance_usd", 10.0))
-        risk_pct = float(account.get("risk_per_trade_pct", 0.02))
+        risk_pct = float(config.get("account", {}).get("risk_per_trade_pct", 0.02))
 
-        return cls(
+        # Use actual account balance for position sizing, not config balance
+        executor = cls(
             api_key=api_key,
             secret_key=secret_key,
             demo=demo,
-            risk_per_trade_usd=balance * risk_pct,
-            max_position_usd=balance * 0.2,
+            risk_per_trade_usd=50.0,  # temporary, will update from live balance
+            max_position_usd=500.0,
             enabled=bool(api_key and secret_key),
         )
+
+        # Fetch real balance and size accordingly
+        if executor.enabled:
+            try:
+                live_balance = executor.get_balance()
+                executor.risk_per_trade_usd = live_balance * risk_pct
+                executor.max_position_usd = live_balance * 0.2
+            except Exception:
+                pass
+
+        return executor
 
     # ── API request helpers ──────────────────────────────────────────
 

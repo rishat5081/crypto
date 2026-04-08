@@ -787,8 +787,26 @@ function TradesPage({ desk }) {
           </div>
           {openTrade && (() => {
             const snap = marketSnaps.find((s) => s.symbol === openTrade.symbol);
-            if (snap?.price) return <div className="status-banner" style={{ background: "#1e293b", color: "#94a3b8" }}>Live price: {formatPrice(snap.price)}</div>;
-            return null;
+            const binance = openTrade.binance_executed;
+            return (
+              <>
+                {binance && (
+                  <div className="status-banner" style={{ background: "#14532d", color: "#86efac" }}>
+                    Placed on Binance — Qty: {openTrade.binance_quantity} | Entry: {formatPrice(openTrade.binance_entry_price)} | Notional: ${fmtNumber(openTrade.binance_notional, 2)}
+                  </div>
+                )}
+                {!binance && (
+                  <div className="status-banner" style={{ background: "#78350f", color: "#fcd34d" }}>
+                    Paper trade only — not placed on Binance
+                  </div>
+                )}
+                {snap?.price && (
+                  <div className="status-banner" style={{ background: "#1e293b", color: "#94a3b8" }}>
+                    Live price: {formatPrice(snap.price)}
+                  </div>
+                )}
+              </>
+            );
           })()}
           <div className="spotlight-head">
             <div>
@@ -852,6 +870,8 @@ function TradesPage({ desk }) {
 function HistoryPage({ desk }) {
   const [historySearch, setHistorySearch] = useState("");
   const [historyWindow, setHistoryWindow] = useState("7d");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 15;
   const deferredHistorySearch = useDeferredValue(historySearch);
   const historyRangeOptions = [
     { value: "24h", label: "24H" },
@@ -914,7 +934,7 @@ function HistoryPage({ desk }) {
         <input
           className="surface-input"
           value={historySearch}
-          onChange={(event) => setHistorySearch(event.target.value)}
+          onChange={(event) => { setHistorySearch(event.target.value); setPage(0); }}
           placeholder="Search symbol, side, result, timeframe, or reason"
         />
         <div className="filter-row">
@@ -923,7 +943,7 @@ function HistoryPage({ desk }) {
               key={option.value}
               type="button"
               className={`filter-chip${historyWindow === option.value ? " active" : ""}`}
-              onClick={() => setHistoryWindow(option.value)}
+              onClick={() => { setHistoryWindow(option.value); setPage(0); }}
             >
               {option.label}
             </button>
@@ -943,12 +963,13 @@ function HistoryPage({ desk }) {
               <th>Exit</th>
               <th>Result</th>
               <th>Reason</th>
+              <th>Binance</th>
               <th>PnL (R)</th>
               <th>PnL ($)</th>
             </tr>
           </thead>
           <tbody>
-            {filteredHistory.map((trade) => {
+            {filteredHistory.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((trade) => {
               const exitReason = (() => {
                 const r = (trade.reason || "").toUpperCase();
                 if (r.includes("ADVERSE_CUT")) return "Adverse Cut";
@@ -971,6 +992,7 @@ function HistoryPage({ desk }) {
                   <td>{formatPrice(trade.exit_price)}</td>
                   <td><span className={`result-chip ${resultTone(trade.result)}`}>{trade.result}</span></td>
                   <td className="reason-cell">{exitReason}</td>
+                  <td>{trade.binance_executed ? <span style={{ color: "#22c55e" }}>Yes</span> : <span style={{ color: "#64748b" }}>No</span>}</td>
                   <td style={{ color: pnlColor, fontWeight: 600 }}>{trade.pnl_r != null ? (trade.pnl_r >= 0 ? "+" : "") + trade.pnl_r.toFixed(3) : "—"}</td>
                   <td style={{ color: pnlColor }}>{trade.pnl_usd != null ? (trade.pnl_usd >= 0 ? "+$" : "-$") + Math.abs(trade.pnl_usd).toFixed(3) : "—"}</td>
                 </tr>
@@ -979,6 +1001,13 @@ function HistoryPage({ desk }) {
           </tbody>
         </table>
         {!filteredHistory.length && <div className="empty-panel" style={{ padding: "2rem", textAlign: "center" }}>No completed trades are stored yet.</div>}
+        {filteredHistory.length > PAGE_SIZE && (
+          <div className="pagination">
+            <button type="button" className="filter-chip" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</button>
+            <span className="pagination-info">Page {page + 1} of {Math.ceil(filteredHistory.length / PAGE_SIZE)} ({filteredHistory.length} trades)</span>
+            <button type="button" className="filter-chip" disabled={(page + 1) * PAGE_SIZE >= filteredHistory.length} onClick={() => setPage(page + 1)}>Next</button>
+          </div>
+        )}
       </div>
     </PageWrap>
   );

@@ -25,7 +25,7 @@ AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 OPTIMIZE_MAX_CANDIDATES="${OPTIMIZE_MAX_CANDIDATES:-6}"
 OPTIMIZE_TIMEOUT_SEC="${OPTIMIZE_TIMEOUT_SEC:-45}"
 HEARTBEAT_SEC="${HEARTBEAT_SEC:-5}"
-RETUNE_FROM_EVENTS="${RETUNE_FROM_EVENTS:-1}"
+RETUNE_FROM_EVENTS="${RETUNE_FROM_EVENTS:-0}"
 RETUNE_LOOKBACK_TRADES="${RETUNE_LOOKBACK_TRADES:-300}"
 RETUNE_MIN_TRADES="${RETUNE_MIN_TRADES:-20}"
 
@@ -38,6 +38,13 @@ for arg in "$@"; do
     --restart)         ;; # always kills stale, this is a no-op alias
   esac
 done
+
+# ── Load .env (Binance API keys etc) ─────────────────────────────────
+if [ -f "$ROOT_DIR/.env" ]; then
+  set -a
+  source "$ROOT_DIR/.env"
+  set +a
+fi
 
 # ── Paths ────────────────────────────────────────────────────────────
 VENV_DIR="$ROOT_DIR/.venv"
