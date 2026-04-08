@@ -134,7 +134,7 @@ function isTradeOpen(trade) {
   const openedAt = toEpochMs(trade.updated_at || trade.time);
   if (openedAt) {
     const tfMin = timeframeMinutes(trade.timeframe) || 15;
-    const maxOpenMs = tfMin * 4 * 60000; // max_wait_candles = 4
+    const maxOpenMs = tfMin * 2 * 60000; // expire after 2 candles on frontend
     if (Date.now() - openedAt > maxOpenMs) return false;
   }
   return true;
@@ -265,6 +265,7 @@ function useLiveDeskData() {
   const [selectedCoin, setSelectedCoin] = useState("ALL");
   const [watchInput, setWatchInput] = useState("");
   const [statusMessage, setStatusMessage] = useState("Control center ready.");
+  const [binance, setBinance] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -373,6 +374,22 @@ function useLiveDeskData() {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+    async function tickBinance() {
+      try {
+        const response = await fetch("/api/binance", { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json();
+        if (cancelled) return;
+        startTransition(() => setBinance(payload));
+      } catch {}
+    }
+    tickBinance();
+    const id = window.setInterval(tickBinance, 15000);
+    return () => { cancelled = true; window.clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
     if (!watchInput || watchInput.trim().length < 2) return;
     const controller = new AbortController();
     const id = window.setTimeout(async () => {
@@ -451,6 +468,7 @@ function useLiveDeskData() {
     analytics,
     history,
     news,
+    binance,
     options,
     watchlistSymbols,
     symbolCatalog,
@@ -727,6 +745,35 @@ function HomePage({ desk }) {
         ))}
       </motion.section>
 
+      {desk.binance?.enabled && (
+        <motion.section className="overview-grid" {...pageMotion}>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Binance Balance</span>
+            <strong>${desk.binance.balance?.toFixed(2)}</strong>
+            <small>{desk.binance.demo ? "Demo account" : "Live account"}</small>
+          </motion.article>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Binance P&L</span>
+            <strong style={{ color: desk.binance.total_pnl >= 0 ? "#22c55e" : "#ef4444" }}>
+              {desk.binance.total_pnl >= 0 ? "+$" : "-$"}{Math.abs(desk.binance.total_pnl)?.toFixed(2)}
+            </strong>
+            <small>Since $5,000 initial</small>
+          </motion.article>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Unrealized P&L</span>
+            <strong style={{ color: desk.binance.unrealized_pnl >= 0 ? "#22c55e" : "#ef4444" }}>
+              {desk.binance.unrealized_pnl >= 0 ? "+$" : "-$"}{Math.abs(desk.binance.unrealized_pnl)?.toFixed(2)}
+            </strong>
+            <small>{desk.binance.open_positions?.length || 0} open positions</small>
+          </motion.article>
+          <motion.article className="overview-card" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }}>
+            <span>Available</span>
+            <strong>${desk.binance.available?.toFixed(2)}</strong>
+            <small>Ready to trade</small>
+          </motion.article>
+        </motion.section>
+      )}
+
       <motion.section className="feature-grid" {...pageMotion}>
         <QuickPageCard to="/trades" title="Trades" copy="See the live trade spotlight and all current opportunities." />
         <QuickPageCard to="/history" title="History" copy="Review stored trade outcomes with cleaner result formatting." />
@@ -787,8 +834,26 @@ function TradesPage({ desk }) {
           </div>
           {openTrade && (() => {
             const snap = marketSnaps.find((s) => s.symbol === openTrade.symbol);
-            if (snap?.price) return <div className="status-banner" style={{ background: "#1e293b", color: "#94a3b8" }}>Live price: {formatPrice(snap.price)}</div>;
-            return null;
+            const binance = openTrade.binance_executed;
+            return (
+              <>
+                {binance && (
+                  <div className="status-banner" style={{ background: "#14532d", color: "#86efac" }}>
+                    Placed on Binance — Qty: {openTrade.binance_quantity} | Entry: {formatPrice(openTrade.binance_entry_price)} | Notional: ${fmtNumber(openTrade.binance_notional, 2)}
+                  </div>
+                )}
+                {!binance && (
+                  <div className="status-banner" style={{ background: "#78350f", color: "#fcd34d" }}>
+                    Paper trade only — not placed on Binance
+                  </div>
+                )}
+                {snap?.price && (
+                  <div className="status-banner" style={{ background: "#1e293b", color: "#94a3b8" }}>
+                    Live price: {formatPrice(snap.price)}
+                  </div>
+                )}
+              </>
+            );
           })()}
           <div className="spotlight-head">
             <div>
@@ -852,6 +917,8 @@ function TradesPage({ desk }) {
 function HistoryPage({ desk }) {
   const [historySearch, setHistorySearch] = useState("");
   const [historyWindow, setHistoryWindow] = useState("7d");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 15;
   const deferredHistorySearch = useDeferredValue(historySearch);
   const historyRangeOptions = [
     { value: "24h", label: "24H" },
@@ -914,7 +981,7 @@ function HistoryPage({ desk }) {
         <input
           className="surface-input"
           value={historySearch}
-          onChange={(event) => setHistorySearch(event.target.value)}
+          onChange={(event) => { setHistorySearch(event.target.value); setPage(0); }}
           placeholder="Search symbol, side, result, timeframe, or reason"
         />
         <div className="filter-row">
@@ -923,37 +990,71 @@ function HistoryPage({ desk }) {
               key={option.value}
               type="button"
               className={`filter-chip${historyWindow === option.value ? " active" : ""}`}
-              onClick={() => setHistoryWindow(option.value)}
+              onClick={() => { setHistoryWindow(option.value); setPage(0); }}
             >
               {option.label}
             </button>
           ))}
         </div>
       </div>
-      <div className="history-grid">
-        {filteredHistory.map((trade) => (
-          <motion.article key={`${trade.trade_key || trade.event_time || trade.symbol}`} className="history-card" whileHover={{ y: -4 }}>
-            <div className="history-top">
-              <strong>{trade.symbol}</strong>
-              <span className={`result-chip ${resultTone(trade.result)}`}>{trade.result || "Unknown"}</span>
-            </div>
-            <div className="history-row">
-              <span>{trade.side}</span>
-              <span>{trade.timeframe}</span>
-            </div>
-            <div className="history-row">
-              <span>Opened: {trade.opened_at_ms ? fmtTime(trade.opened_at_ms) : "—"}</span>
-              <span>Closed: {fmtTime(getTradeCloseMs(trade))}</span>
-            </div>
-            <div className="history-metrics">
-              <Stat label="Entry" value={formatPrice(trade.entry)} />
-              <Stat label="Exit" value={formatPrice(trade.exit_price)} />
-              <Stat label="PnL (R)" value={fmtNumber(trade.pnl_r, 3)} />
-              <Stat label="PnL (USD)" value={fmtNumber(trade.pnl_usd, 3)} />
-            </div>
-          </motion.article>
-        ))}
-        {!filteredHistory.length && <div className="feature-panel empty-panel">No completed trades are stored yet.</div>}
+      <div className="feature-panel" style={{ overflowX: "auto" }}>
+        <table className="history-table">
+          <thead>
+            <tr>
+              <th>Opened</th>
+              <th>Closed</th>
+              <th>Symbol</th>
+              <th>Side</th>
+              <th>TF</th>
+              <th>Entry</th>
+              <th>Exit</th>
+              <th>Result</th>
+              <th>Reason</th>
+              <th>Binance</th>
+              <th>PnL (R)</th>
+              <th>PnL ($)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredHistory.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE).map((trade) => {
+              const exitReason = (() => {
+                const r = (trade.reason || "").toUpperCase();
+                if (r.includes("ADVERSE_CUT")) return "Adverse Cut";
+                if (r.includes("STAGNATION")) return "Stagnation";
+                if (r.includes("MOMENTUM_REVERSAL")) return "Momentum Rev.";
+                if (r.includes("TIMEOUT")) return "Timeout";
+                if (trade.result === "WIN") return "TP Hit";
+                if (trade.result === "LOSS") return "SL Hit";
+                return trade.reason ? trade.reason.split("|")[0].trim() : "—";
+              })();
+              const pnlColor = (trade.pnl_r || 0) > 0 ? "#22c55e" : (trade.pnl_r || 0) < 0 ? "#ef4444" : "#94a3b8";
+              return (
+                <tr key={`${trade.trade_key || trade.event_time || trade.symbol}-${trade.closed_at_ms}`}>
+                  <td>{trade.opened_at_ms ? fmtTime(trade.opened_at_ms) : "—"}</td>
+                  <td>{fmtTime(getTradeCloseMs(trade))}</td>
+                  <td><strong>{trade.symbol}</strong></td>
+                  <td><span className={`tone-pill compact ${sideTone(trade.side)}`}>{trade.side}</span></td>
+                  <td>{trade.timeframe}</td>
+                  <td>{formatPrice(trade.entry)}</td>
+                  <td>{formatPrice(trade.exit_price)}</td>
+                  <td><span className={`result-chip ${resultTone(trade.result)}`}>{trade.result}</span></td>
+                  <td className="reason-cell">{exitReason}</td>
+                  <td>{trade.binance_executed ? <span style={{ color: "#22c55e" }}>Yes</span> : <span style={{ color: "#64748b" }}>No</span>}</td>
+                  <td style={{ color: pnlColor, fontWeight: 600 }}>{trade.pnl_r != null ? (trade.pnl_r >= 0 ? "+" : "") + trade.pnl_r.toFixed(3) : "—"}</td>
+                  <td style={{ color: pnlColor }}>{trade.pnl_usd != null ? (trade.pnl_usd >= 0 ? "+$" : "-$") + Math.abs(trade.pnl_usd).toFixed(3) : "—"}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!filteredHistory.length && <div className="empty-panel" style={{ padding: "2rem", textAlign: "center" }}>No completed trades are stored yet.</div>}
+        {filteredHistory.length > PAGE_SIZE && (
+          <div className="pagination">
+            <button type="button" className="filter-chip" disabled={page === 0} onClick={() => setPage(page - 1)}>Previous</button>
+            <span className="pagination-info">Page {page + 1} of {Math.ceil(filteredHistory.length / PAGE_SIZE)} ({filteredHistory.length} trades)</span>
+            <button type="button" className="filter-chip" disabled={(page + 1) * PAGE_SIZE >= filteredHistory.length} onClick={() => setPage(page + 1)}>Next</button>
+          </div>
+        )}
       </div>
     </PageWrap>
   );

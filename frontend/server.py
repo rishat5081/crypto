@@ -546,6 +546,24 @@ class EventStateCache:
             self._state["possible_probability_categories"] = cats if isinstance(cats, dict) else {}
             return
 
+        if event_type == "BINANCE_ORDER":
+            action = event.get("action")
+            result = event.get("result") or {}
+            open_trade = self._state.get("open_trade") or {}
+            if action == "OPEN" and open_trade:
+                open_trade["binance_executed"] = result.get("executed", False)
+                open_trade["binance_order_id"] = result.get("order_id")
+                open_trade["binance_entry_price"] = result.get("entry_price")
+                open_trade["binance_quantity"] = result.get("quantity")
+                open_trade["binance_notional"] = result.get("notional")
+                open_trade["binance_status"] = result.get("status")
+                self._state["open_trade"] = open_trade
+            elif action == "CLOSE":
+                if open_trade:
+                    open_trade["binance_close_status"] = result.get("status")
+                    self._state["open_trade"] = open_trade
+            return
+
         if event_type in {"SYMBOL_COOLDOWN_APPLIED", "SYMBOL_COOLDOWN_CLEARED", "GUARD_RETUNE"}:
             self._state["guard_event"] = event
             return
@@ -678,6 +696,7 @@ class TradeHistoryCache:
             "pnl_r": trade.get("pnl_r"),
             "pnl_usd": trade.get("pnl_usd"),
             "reason": trade.get("reason"),
+            "binance_executed": event.get("binance_executed", False),
         }
 
     def _append(self, event: Dict[str, Any], trade: Dict[str, Any]) -> None:
@@ -1325,6 +1344,46 @@ class DashboardHandler(SimpleHTTPRequestHandler):
             except ValueError:
                 limit = 200
             self._write_json(self.history_cache.refresh(limit=limit))
+            return
+        if path == "/api/binance":
+            try:
+                from src.binance_executor import BinanceExecutor
+                import json as _json
+                config = _json.load(open(self.config_store.config_file, "r"))
+                executor = BinanceExecutor.from_env(config)
+                if not executor.enabled:
+                    self._write_json({"enabled": False, "error": "No API keys"})
+                    return
+                account = executor.get_account()
+                balance = float(account.get("totalWalletBalance", 0))
+                available = float(account.get("availableBalance", 0))
+                unrealized = float(account.get("totalUnrealizedProfit", 0))
+                positions = [
+                    {
+                        "symbol": p["symbol"],
+                        "side": "LONG" if float(p.get("positionAmt", 0)) > 0 else "SHORT",
+                        "size": abs(float(p.get("positionAmt", 0))),
+                        "entry": float(p.get("entryPrice", 0)),
+                        "pnl": float(p.get("unrealizedProfit", 0)),
+                        "margin": float(p.get("initialMargin", 0)),
+                    }
+                    for p in account.get("positions", [])
+                    if float(p.get("positionAmt", 0)) != 0
+                ]
+                self._write_json({
+                    "enabled": True,
+                    "demo": executor.demo,
+                    "balance": round(balance, 2),
+                    "available": round(available, 2),
+                    "unrealized_pnl": round(unrealized, 2),
+                    "total_equity": round(balance + unrealized, 2),
+                    "initial_balance": 5000.0,
+                    "total_pnl": round(balance + unrealized - 5000.0, 2),
+                    "open_positions": positions,
+                    "time": datetime.now(timezone.utc).isoformat(),
+                })
+            except Exception as exc:
+                self._write_json({"enabled": False, "error": str(exc)})
             return
         if path == "/api/health":
             self._write_json({"ok": True, "time": datetime.now(timezone.utc).isoformat()})
