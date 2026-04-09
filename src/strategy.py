@@ -199,6 +199,23 @@ class StrategyEngine:
         if not side:
             return None
 
+        # Volume confirmation: skip only very low volume entries.
+        if len(candles) >= 20:
+            recent_vols = [c.volume for c in candles[-20:]]
+            avg_vol = sum(recent_vols) / len(recent_vols)
+            if avg_vol > 0 and last.volume < avg_vol * 0.5:
+                return None
+
+        # Candle body confirmation: skip only strong reversal candles
+        # (body > 50% of range in wrong direction)
+        candle_range = last.high - last.low
+        if candle_range > 0:
+            body_ratio = abs(last.close - last.open) / candle_range
+            if side == "LONG" and last.close < last.open and body_ratio > 0.6:
+                return None
+            if side == "SHORT" and last.close > last.open and body_ratio > 0.6:
+                return None
+
         sl_distance = atr_v * self.params.atr_multiplier
         if side == "LONG":
             stop_loss = entry - sl_distance
