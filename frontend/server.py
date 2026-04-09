@@ -11,7 +11,6 @@ from email.utils import parsedate_to_datetime
 from hashlib import sha1
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
-import os
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.error import URLError
@@ -510,7 +509,6 @@ class EventStateCache:
         rows = rows[: self._recent_possible_limit]
 
         live_rows = [row for row in rows if row.get("signal_state") == "LIVE"]
-        recent_rows = [row for row in rows if row.get("signal_state") == "RECENT"]
         self._state["possible_trades_live"] = live_rows
         self._state["possible_trades_recent"] = rows
         self._state["possible_trades"] = rows
@@ -1292,8 +1290,6 @@ class AnalyticsEngine:
         losses = 0
         total_win_r = 0.0
         total_loss_r = 0.0
-        win_streak = 0
-        loss_streak = 0
         max_win_streak = 0
         max_loss_streak = 0
         current_streak_type = None
@@ -1793,7 +1789,7 @@ class DashboardHandler(SimpleHTTPRequestHandler):
         if path != "/":
             requested = Path(self.directory) / path.lstrip("/")
             if not requested.exists() and "." not in Path(path).name:
-              self.path = "/index.html"
+                self.path = "/index.html"
         super().do_GET()
 
     def do_POST(self) -> None:

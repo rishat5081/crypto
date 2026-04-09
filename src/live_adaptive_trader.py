@@ -728,7 +728,7 @@ class LiveAdaptivePaperTrader:
             if time.time() - start >= max_wait_seconds:
                 active = engine.active_trade
                 if active:
-                    latest = (last_known_candles or candles)[-1] if last_known_candles else None
+                    latest = last_known_candles[-1] if last_known_candles else None
                     if latest:
                         return _make_exit(active, latest, "TIMEOUT_EXIT")
 
