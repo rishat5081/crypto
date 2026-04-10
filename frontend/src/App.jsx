@@ -254,6 +254,12 @@ function resultTone(result) {
   return "neutral";
 }
 
+function prettyLabel(value) {
+  return String(value || "-")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
 function useLiveDeskData() {
   const [state, setState] = useState(null);
   const [analytics, setAnalytics] = useState(null);
@@ -829,7 +835,12 @@ function TradesPage({ desk }) {
   const isDeskFresh = isFresh(desk.state?.last_update || desk.state?.generated_at);
   const rawOpenTrade = desk.state?.open_trade || null;
   const marketSnaps = desk.state?.market || [];
+  const binancePositions = Array.isArray(desk.binance?.open_positions) ? desk.binance.open_positions : [];
   const openTradeStatus = tradeStatus(rawOpenTrade);
+  const matchingBinancePosition = rawOpenTrade
+    ? binancePositions.find((position) => position.symbol === rawOpenTrade.symbol && position.side === rawOpenTrade.side)
+    : null;
+  const binanceTradeConfirmed = rawOpenTrade?.binance_executed ? Boolean(matchingBinancePosition) : false;
   // Check if SL/TP is breached by live price — treat as closed
   const slTpBreached = (() => {
     if (!rawOpenTrade || openTradeStatus !== "active") return false;
@@ -841,7 +852,8 @@ function TradesPage({ desk }) {
     if (rawOpenTrade.side === "SHORT" && sl && p >= sl) return true;
     return false;
   })();
-  const openTrade = (openTradeStatus === "active" && !slTpBreached) ? rawOpenTrade : null;
+  const staleBinanceTrade = Boolean(rawOpenTrade?.binance_executed) && !binanceTradeConfirmed;
+  const openTrade = (openTradeStatus === "active" && !slTpBreached && !staleBinanceTrade) ? rawOpenTrade : null;
   const openSymbol = openTrade?.symbol || null;
   const possibleTrades = isDeskFresh && Array.isArray(desk.state?.possible_trades_live)
     ? desk.state.possible_trades_live.filter((trade) => isFresh(trade.last_seen_time || trade.updated_at || trade.time) && trade.symbol !== openSymbol)
@@ -871,14 +883,19 @@ function TradesPage({ desk }) {
             <span>Trade Spotlight</span>
             <span>{openTrade ? "Active trade" : "Highest-ranked setup"}</span>
           </div>
+          {rawOpenTrade && staleBinanceTrade && (
+            <div className="status-banner" style={{ background: "#7f1d1d", color: "#fecaca" }}>
+              Trader cache reported a Binance trade, but Binance has no live open position for {rawOpenTrade.symbol}. The spotlight is falling back to the next valid setup.
+            </div>
+          )}
           {openTrade && (() => {
             const snap = marketSnaps.find((s) => s.symbol === openTrade.symbol);
-            const binance = openTrade.binance_executed;
+            const binance = binanceTradeConfirmed;
             return (
               <>
                 {binance && (
                   <div className="status-banner" style={{ background: "#14532d", color: "#86efac" }}>
-                    Placed on Binance — Qty: {openTrade.binance_quantity} | Entry: {formatPrice(openTrade.binance_entry_price)} | Notional: ${fmtNumber(openTrade.binance_notional, 2)}
+                    Placed on Binance — Qty: {fmtNumber(matchingBinancePosition?.size || openTrade.binance_quantity, 4)} | Entry: {formatPrice(matchingBinancePosition?.entry || openTrade.binance_entry_price)} | Unrealized PnL: ${fmtNumber(matchingBinancePosition?.pnl, 2)}
                   </div>
                 )}
                 {!binance && (
@@ -1053,6 +1070,10 @@ function HistoryPage({ desk }) {
               <th>Symbol</th>
               <th>Side</th>
               <th>TF</th>
+              <th>Signal</th>
+              <th>Exit Type</th>
+              <th>Stop State</th>
+              <th>Hold (min)</th>
               <th>Entry</th>
               <th>Exit</th>
               <th>Result</th>
@@ -1084,6 +1105,10 @@ function HistoryPage({ desk }) {
                   <td><strong>{trade.symbol}</strong></td>
                   <td><span className={`tone-pill compact ${sideTone(trade.side)}`}>{trade.side}</span></td>
                   <td>{trade.timeframe}</td>
+                  <td>{prettyLabel(trade.signal_type)}</td>
+                  <td>{prettyLabel(trade.exit_type || exitReason)}</td>
+                  <td>{prettyLabel(trade.stop_state)}</td>
+                  <td>{trade.hold_minutes != null ? Number(trade.hold_minutes).toFixed(1) : "—"}</td>
                   <td>{formatPrice(trade.entry)}</td>
                   <td>{formatPrice(trade.exit_price)}</td>
                   <td><span className={`result-chip ${resultTone(trade.result)}`}>{trade.result}</span></td>
@@ -1108,6 +1133,92 @@ function HistoryPage({ desk }) {
             <button type="button" className="filter-chip" disabled={(page + 1) * PAGE_SIZE >= filteredHistory.length} onClick={() => setPage(page + 1)}>Next</button>
           </div>
         )}
+      </div>
+      <div className="diagnostic-grid">
+        <div className="feature-panel diagnostic-panel">
+          <div className="panel-topline">
+            <span>Worst Symbols</span>
+            <span>Net USDT</span>
+          </div>
+          <table className="diagnostic-table">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(desk.analytics?.worst_symbols || []).map((row) => (
+                <tr key={row.symbol}>
+                  <td>{row.symbol}</td>
+                  <td>{row.trades}</td>
+                  <td>{fmtPercent(row.win_rate)}</td>
+                  <td style={{ color: Number(row.net_pnl_usdt || 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+                    {Number(row.net_pnl_usdt || 0).toFixed(3)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="feature-panel diagnostic-panel">
+          <div className="panel-topline">
+            <span>Worst Exit Types</span>
+            <span>Loss Buckets</span>
+          </div>
+          <table className="diagnostic-table">
+            <thead>
+              <tr>
+                <th>Exit Type</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(desk.analytics?.worst_exit_types || []).map((row) => (
+                <tr key={row.exit_type}>
+                  <td>{prettyLabel(row.exit_type)}</td>
+                  <td>{row.trades}</td>
+                  <td>{fmtPercent(row.win_rate)}</td>
+                  <td style={{ color: Number(row.net_pnl_usdt || 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+                    {Number(row.net_pnl_usdt || 0).toFixed(3)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="feature-panel diagnostic-panel">
+          <div className="panel-topline">
+            <span>Worst Setup x Exit</span>
+            <span>Combined Failure Modes</span>
+          </div>
+          <table className="diagnostic-table">
+            <thead>
+              <tr>
+                <th>Combo</th>
+                <th>Trades</th>
+                <th>Win Rate</th>
+                <th>Net</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(desk.analytics?.worst_signal_exit_combos || []).map((row) => (
+                <tr key={row.combo}>
+                  <td>{prettyLabel(row.combo)}</td>
+                  <td>{row.trades}</td>
+                  <td>{fmtPercent(row.win_rate)}</td>
+                  <td style={{ color: Number(row.net_pnl_usdt || 0) >= 0 ? "#22c55e" : "#ef4444" }}>
+                    {Number(row.net_pnl_usdt || 0).toFixed(3)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     </PageWrap>
   );

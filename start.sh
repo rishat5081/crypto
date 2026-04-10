@@ -248,6 +248,7 @@ else
   : > "$OPT_LOG"
 
   set +e
+  OPT_TIMED_OUT=0
   python "$ROOT_DIR/run_ml_walkforward.py" \
     --config "$ROOT_DIR/config.json" \
     --cache-dir "$CACHE_DIR" \
@@ -266,6 +267,7 @@ else
     log "  Optimizing... ${ELAPSED}s"
     emit_event "OPTIMIZING" "In progress (${ELAPSED}s)"
     if [ "$ELAPSED" -ge "$OPTIMIZE_TIMEOUT_SEC" ]; then
+      OPT_TIMED_OUT=1
       kill "$OPT_PID" 2>/dev/null || true
       sleep 1
       kill -0 "$OPT_PID" 2>/dev/null && kill -9 "$OPT_PID" 2>/dev/null || true
@@ -276,15 +278,23 @@ else
     fi
     sleep "$HEARTBEAT_SEC"
   done
-  wait "$OPT_PID" 2>/dev/null || true
+  wait "$OPT_PID" 2>/dev/null
+  OPT_STATUS=$?
   set -e
 
   if [ -s "$OPT_LOG" ]; then
     cat "$OPT_LOG" >> "$EVENTS_FILE" 2>/dev/null || true
     cat "$OPT_LOG" >> "$HISTORY_FILE" 2>/dev/null || true
   fi
-  ok "Optimization step done"
-  emit_event "OPTIMIZATION_DONE" "Complete"
+  if [ "${OPT_TIMED_OUT:-0}" -eq 1 ]; then
+    warn "Optimization step timed out, continuing without updated walk-forward parameters"
+  elif [ "${OPT_STATUS:-0}" -eq 0 ]; then
+    ok "Optimization step done"
+    emit_event "OPTIMIZATION_DONE" "Complete"
+  else
+    warn "Optimization failed (exit $OPT_STATUS), continuing with current strategy parameters"
+    emit_event "OPTIMIZATION_FAILED" "Exit $OPT_STATUS, continuing"
+  fi
 fi
 
 # ── Threshold retune from history ────────────────────────────────────

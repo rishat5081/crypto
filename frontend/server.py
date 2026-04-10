@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import sys
 import threading
 import time
 from datetime import datetime, timezone
@@ -17,6 +18,10 @@ from urllib.error import URLError
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from xml.etree import ElementTree as ET
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
     from pymongo import ASCENDING, DESCENDING, MongoClient
@@ -124,11 +129,13 @@ class MongoStore:
         symbol = str(trade.get("symbol") or "").upper()
         timeframe = str(trade.get("timeframe") or "")
         side = str(trade.get("side") or "")
-        result = str(trade.get("result") or "")
         opened = trade.get("opened_at_ms")
         closed = trade.get("closed_at_ms")
+        if opened is not None or closed is not None:
+            return f"{symbol}|{timeframe}|{side}|{opened}|{closed}"
+        result = str(trade.get("result") or "")
         event_time = str(event.get("time") or "")
-        return f"{symbol}|{timeframe}|{side}|{result}|{opened}|{closed}|{event_time}"
+        return f"{symbol}|{timeframe}|{side}|{result}|{event_time}"
 
     @staticmethod
     def _clean_output(doc: Dict[str, Any]) -> Dict[str, Any]:
@@ -180,6 +187,7 @@ class MongoStore:
             "pnl_r": trade.get("pnl_r"),
             "pnl_usd": trade.get("pnl_usd"),
             "reason": trade.get("reason"),
+            "trade_meta": event.get("trade_meta"),
             "summary": event.get("summary"),
             "ingested_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -214,6 +222,10 @@ class MongoStore:
             "reason": record.get("reason"),
             "est_cost_usd": record.get("est_cost_usd"),
             "net_pnl_usdt": record.get("net_pnl_usdt"),
+            "signal_type": record.get("signal_type"),
+            "exit_type": record.get("exit_type"),
+            "stop_state": record.get("stop_state"),
+            "hold_minutes": record.get("hold_minutes"),
             "binance_executed": record.get("binance_executed"),
             "synthetic": record.get("synthetic", False),
             "history_source": record.get("history_source"),
@@ -592,10 +604,20 @@ class EventStateCache:
                 open_trade["binance_notional"] = result.get("notional")
                 open_trade["binance_status"] = result.get("status")
                 self._state["open_trade"] = open_trade
-            elif action == "CLOSE":
+            elif action in {"CLOSE", "RETRY_CLOSE", "ORPHAN_CLOSE"}:
                 if open_trade:
-                    open_trade["binance_close_status"] = result.get("status")
-                    self._state["open_trade"] = open_trade
+                    sticky = dict(open_trade)
+                    sticky["signal_state"] = "CLOSED"
+                    sticky["binance_executed"] = False
+                    sticky["binance_close_action"] = action
+                    sticky["binance_close_status"] = result.get("status") or action.lower()
+                    sticky["closed_result"] = sticky.get("closed_result") or (
+                        "WIN" if float(event.get("pnl") or 0.0) > 0 else "LOSS" if float(event.get("pnl") or 0.0) < 0 else "BREAKEVEN"
+                    )
+                    sticky["closed_pnl_usd"] = event.get("pnl")
+                    sticky["updated_at"] = event_time
+                    self._state["open_trade"] = sticky
+                    self._state["status"] = f"BINANCE_{action}"
             return
 
         if event_type in {"SYMBOL_COOLDOWN_APPLIED", "SYMBOL_COOLDOWN_CLEARED", "GUARD_RETUNE"}:
@@ -627,6 +649,7 @@ class EventStateCache:
                 "closed_pnl_r": trade.get("pnl_r"),
                 "closed_pnl_usd": trade.get("pnl_usd"),
                 "closed_at_ms": trade.get("closed_at_ms"),
+                "binance_executed": False,
                 "updated_at": event_time,
             }
             self._state["open_trade"] = sticky
@@ -742,11 +765,13 @@ class TradeHistoryCache:
         symbol = str(trade.get("symbol") or "").upper()
         timeframe = str(trade.get("timeframe") or "")
         side = str(trade.get("side") or "")
-        result = str(trade.get("result") or "")
         opened = trade.get("opened_at_ms")
         closed = trade.get("closed_at_ms")
+        if opened is not None or closed is not None:
+            return f"{symbol}|{timeframe}|{side}|{opened}|{closed}"
+        result = str(trade.get("result") or "")
         event_time = str(event.get("time") or "")
-        return f"{symbol}|{timeframe}|{side}|{result}|{opened}|{closed}|{event_time}"
+        return f"{symbol}|{timeframe}|{side}|{result}|{event_time}"
 
     @staticmethod
     def _symbol_key(symbol: Any, side: Any) -> str:
@@ -763,10 +788,57 @@ class TradeHistoryCache:
             return None
 
     def _normalize_record(self, event: Dict[str, Any], trade: Dict[str, Any]) -> Dict[str, Any]:
+        trade_meta = event.get("trade_meta") or {}
         pnl_usd = float(trade.get("pnl_usd") or 0.0)
         est_cost_usd = self._estimated_cost_usd(trade)
         net_pnl_usdt = pnl_usd - est_cost_usd
+        trade_key = self._trade_key(event, trade)
+        opened = trade.get("opened_at_ms")
+        closed = trade.get("closed_at_ms")
+        hold_minutes = trade_meta.get("hold_minutes")
+        if hold_minutes is None:
+            try:
+                if opened is not None and closed is not None and int(closed) > int(opened):
+                    hold_minutes = round((int(closed) - int(opened)) / 60000.0, 4)
+            except (TypeError, ValueError):
+                hold_minutes = None
+
+        reason = str(trade.get("reason") or "")
+        reason_upper = reason.upper()
+        signal_type = str(trade_meta.get("signal_type") or "").upper()
+        if not signal_type:
+            if "PULLBACK" in reason_upper:
+                signal_type = "PULLBACK"
+            elif "MOMENTUM" in reason_upper:
+                signal_type = "MOMENTUM"
+            elif "CROSSOVER" in reason_upper:
+                signal_type = "CROSSOVER"
+            else:
+                signal_type = "UNKNOWN"
+
+        exit_type = str(trade_meta.get("exit_type") or "").upper()
+        if not exit_type:
+            result = str(trade.get("result") or "").upper()
+            if "ADVERSE_CUT" in reason_upper:
+                exit_type = "ADVERSE_CUT"
+            elif "MOMENTUM_REVERSAL" in reason_upper:
+                exit_type = "MOMENTUM_REVERSAL"
+            elif "STAGNATION" in reason_upper:
+                exit_type = "STAGNATION_EXIT"
+            elif "TIMEOUT" in reason_upper:
+                exit_type = "TIMEOUT_EXIT"
+            elif "NETWORK_ERROR" in reason_upper:
+                exit_type = "NETWORK_ERROR_EXIT"
+            elif result == "WIN":
+                exit_type = "DIRECT_TP"
+            elif result == "LOSS":
+                exit_type = "DIRECT_SL"
+            else:
+                exit_type = "DIRECT_EXIT"
+
+        stop_state = str(trade_meta.get("stop_state") or "ORIGINAL").upper()
         return {
+            "trade_key": trade_key,
             "event_time": event.get("time"),
             "cycle": event.get("cycle"),
             "symbol": trade.get("symbol"),
@@ -784,6 +856,10 @@ class TradeHistoryCache:
             "est_cost_usd": round(est_cost_usd, 6),
             "net_pnl_usdt": round(net_pnl_usdt, 6),
             "reason": trade.get("reason"),
+            "signal_type": signal_type,
+            "exit_type": exit_type,
+            "stop_state": stop_state,
+            "hold_minutes": hold_minutes,
             "binance_executed": event.get("binance_executed", False),
         }
 
@@ -1273,15 +1349,24 @@ class AnalyticsEngine:
                 "summary": {},
                 "equity_curve": [],
                 "symbol_breakdown": [],
+                "exit_type_breakdown": [],
+                "signal_type_breakdown": [],
+                "signal_exit_breakdown": [],
+                "duration_breakdown": [],
+                "stop_state_breakdown": [],
+                "worst_symbols": [],
+                "worst_exit_types": [],
+                "worst_signal_exit_combos": [],
                 "streaks": {},
                 "drawdown": {},
                 "pnl_distribution": {},
                 "rolling_win_rate": [],
                 "duration_stats": {},
                 "profit_factor": 0.0,
+                "win_rate": 0.0,
+                "expectancy_r": 0.0,
             }
 
-        # Equity curve
         equity = 0.0
         net_equity_usdt = 0.0
         equity_curve = []
@@ -1295,6 +1380,25 @@ class AnalyticsEngine:
         current_streak_type = None
         current_streak_count = 0
         durations = []
+        exit_stats: Dict[str, Dict[str, float]] = {}
+        signal_stats: Dict[str, Dict[str, float]] = {}
+        signal_exit_stats: Dict[str, Dict[str, float]] = {}
+        duration_stats_map: Dict[str, Dict[str, float]] = {}
+        stop_state_stats: Dict[str, Dict[str, float]] = {}
+
+        def bump(bucket: Dict[str, Dict[str, float]], key: str, item: Dict[str, Any]) -> None:
+            label = str(key or "UNKNOWN")
+            if label not in bucket:
+                bucket[label] = {"trades": 0, "wins": 0, "losses": 0, "pnl_r": 0.0, "net_pnl_usdt": 0.0}
+            row = bucket[label]
+            row["trades"] += 1
+            result_name = str(item.get("result") or "").upper()
+            if result_name == "WIN":
+                row["wins"] += 1
+            elif result_name == "LOSS":
+                row["losses"] += 1
+            row["pnl_r"] += float(item.get("pnl_r") or 0)
+            row["net_pnl_usdt"] += float(item.get("net_pnl_usdt") or item.get("pnl_usd") or 0)
 
         for item in items:
             pnl_r = float(item.get("pnl_r") or 0)
@@ -1328,6 +1432,30 @@ class AnalyticsEngine:
                 }
             )
 
+            signal_type = str(item.get("signal_type") or "UNKNOWN").upper()
+            exit_type = str(item.get("exit_type") or "UNKNOWN").upper()
+            stop_state = str(item.get("stop_state") or "ORIGINAL").upper()
+            combo = f"{signal_type} x {exit_type}"
+            hold_minutes = item.get("hold_minutes")
+            try:
+                hold_value = float(hold_minutes) if hold_minutes is not None else None
+            except (TypeError, ValueError):
+                hold_value = None
+            if hold_value is None:
+                duration_bucket = "UNKNOWN"
+            elif hold_value <= 15:
+                duration_bucket = "<=15M"
+            elif hold_value <= 60:
+                duration_bucket = "15M-60M"
+            else:
+                duration_bucket = ">60M"
+
+            bump(exit_stats, exit_type, item)
+            bump(signal_stats, signal_type, item)
+            bump(signal_exit_stats, combo, item)
+            bump(duration_stats_map, duration_bucket, item)
+            bump(stop_state_stats, stop_state, item)
+
             if result == "WIN":
                 wins += 1
                 total_win_r += pnl_r
@@ -1354,7 +1482,6 @@ class AnalyticsEngine:
         avg_loss_r = (total_loss_r / losses) if losses else 0.0
         expectancy_r = (win_rate * avg_win_r) - ((1 - win_rate) * avg_loss_r)
 
-        # Drawdown
         peak = 0.0
         max_dd = 0.0
         running = 0.0
@@ -1369,7 +1496,6 @@ class AnalyticsEngine:
             ts = item.get("closed_at_ms") or item.get("event_time") or ""
             dd_curve.append({"time": ts, "drawdown": round(dd, 4), "net_usdt": round(running_net, 4)})
 
-        # Symbol breakdown
         sym_stats: Dict[str, Dict] = {}
         for item in items:
             sym = str(item.get("symbol") or "UNKNOWN")
@@ -1400,7 +1526,32 @@ class AnalyticsEngine:
                 "pnl_r": round(s["pnl_r"], 4),
             })
 
-        # PnL distribution buckets
+        def finalize_breakdown(stats: Dict[str, Dict[str, float]], label_field: str) -> list[Dict[str, Any]]:
+            rows = []
+            for label, row in sorted(stats.items(), key=lambda item: (item[1]["net_pnl_usdt"], item[0])):
+                trades = int(row["trades"])
+                rows.append(
+                    {
+                        label_field: label,
+                        "trades": trades,
+                        "wins": int(row["wins"]),
+                        "losses": int(row["losses"]),
+                        "win_rate": round((row["wins"] / trades), 4) if trades else 0.0,
+                        "pnl_r": round(row["pnl_r"], 4),
+                        "net_pnl_usdt": round(row["net_pnl_usdt"], 4),
+                    }
+                )
+            return rows
+
+        exit_type_breakdown = finalize_breakdown(exit_stats, "exit_type")
+        signal_type_breakdown = finalize_breakdown(signal_stats, "signal_type")
+        signal_exit_breakdown = finalize_breakdown(signal_exit_stats, "combo")
+        duration_breakdown = finalize_breakdown(duration_stats_map, "bucket")
+        stop_state_breakdown = finalize_breakdown(stop_state_stats, "stop_state")
+        worst_symbols = sorted(symbol_breakdown, key=lambda row: (row["net_pnl_usdt"], row["symbol"]))[:5]
+        worst_exit_types = exit_type_breakdown[:5]
+        worst_signal_exit_combos = signal_exit_breakdown[:5]
+
         dist_buckets = {"<-1R": 0, "-1R to -0.5R": 0, "-0.5R to 0": 0, "0 to 0.5R": 0, "0.5R to 1R": 0, ">1R": 0}
         for v in pnl_values:
             if v < -1:
@@ -1416,7 +1567,6 @@ class AnalyticsEngine:
             else:
                 dist_buckets[">1R"] += 1
 
-        # Rolling win rate (window of 10 trades)
         rolling = []
         window = 10
         for i in range(len(items)):
@@ -1427,7 +1577,6 @@ class AnalyticsEngine:
             ts = items[i].get("closed_at_ms") or items[i].get("event_time") or ""
             rolling.append({"time": ts, "win_rate": round(wr, 4), "trade_num": i + 1})
 
-        # Duration stats
         dur_stats = {}
         if durations:
             dur_stats = {
@@ -1452,8 +1601,18 @@ class AnalyticsEngine:
                 "total_est_cost_usd": round(sum(float(item.get("est_cost_usd") or 0) for item in items), 4),
                 "avg_net_pnl_usdt": round(net_equity_usdt / total, 4) if total else 0.0,
             },
+            "win_rate": round(win_rate, 4),
+            "expectancy_r": round(expectancy_r, 4),
             "equity_curve": equity_curve,
             "symbol_breakdown": symbol_breakdown,
+            "exit_type_breakdown": exit_type_breakdown,
+            "signal_type_breakdown": signal_type_breakdown,
+            "signal_exit_breakdown": signal_exit_breakdown,
+            "duration_breakdown": duration_breakdown,
+            "stop_state_breakdown": stop_state_breakdown,
+            "worst_symbols": worst_symbols,
+            "worst_exit_types": worst_exit_types,
+            "worst_signal_exit_combos": worst_signal_exit_combos,
             "streaks": {
                 "max_win_streak": max_win_streak,
                 "max_loss_streak": max_loss_streak,
@@ -1485,6 +1644,23 @@ class ConfigStore:
             "trail_trigger_r",
             "break_even_trigger_r",
             "max_adverse_r_cut",
+            "crossover_score_multiplier",
+            "pullback_score_multiplier",
+            "crossover_min_trend_strength",
+            "crossover_min_confidence",
+            "crossover_execute_min_confidence",
+            "crossover_execute_min_expectancy_r",
+            "crossover_execute_min_score",
+            "crossover_execute_min_win_probability",
+            "min_symbol_quality_for_entry",
+            "min_symbol_history_for_entry",
+            "min_symbol_win_rate_for_entry",
+            "min_symbol_expectancy_r_for_entry",
+            "min_open_interest_notional_usd",
+            "close_orphaned_positions_on_startup",
+            "reentry_cooldown_cycles",
+            "fast_exit_reentry_cooldown_cycles",
+            "fast_exit_minutes_threshold",
         ),
     }
 

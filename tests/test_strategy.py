@@ -94,6 +94,13 @@ class StrategyEngineTests(unittest.TestCase):
         if sig is not None:
             self.assertLess(sig.confidence, 1.0)
 
+    def test_crossover_long_rsi_floor_can_block_neutral_crossover(self) -> None:
+        prices = [95 + i * 0.3 for i in range(60)]
+        candles = _make_candles(prices)
+        engine = StrategyEngine(_default_params(min_confidence=0.25, crossover_long_rsi_min=90))
+        sig = engine.evaluate("BTCUSDT", "5m", candles, _neutral_market())
+        self.assertIsNone(sig)
+
     def test_atr_outside_range_blocks_signal(self) -> None:
         # Flat prices → ATR ~ 0 → below min_atr_pct
         prices = [100.0] * 60

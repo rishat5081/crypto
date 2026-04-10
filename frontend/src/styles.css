@@ -786,6 +786,38 @@ select {
   color: var(--fg-muted, #94a3b8);
 }
 
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.diagnostic-panel {
+  overflow-x: auto;
+}
+
+.diagnostic-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+  margin-top: 10px;
+}
+
+.diagnostic-table th,
+.diagnostic-table td {
+  padding: 10px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.diagnostic-table th {
+  color: var(--fg-muted, #94a3b8);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .tone-pill.compact {
   padding: 2px 8px;
   font-size: 0.7rem;
@@ -1147,6 +1179,7 @@ select {
   .two-column,
   .history-summary,
   .history-grid,
+  .diagnostic-grid,
   .feature-grid,
   .news-grid,
   .controls-overview {

@@ -3,10 +3,26 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Iterable, List
 
 from src.cache_loader import load_market_datasets_from_cache
 from src.config import load_config
 from src.ml_pipeline import MLWalkForwardOptimizer
+
+
+def list_missing_cache_files(cache_dir: str, symbols: Iterable[str], timeframes: Iterable[str]) -> List[str]:
+    base = Path(cache_dir)
+    missing: List[str] = []
+    for symbol in symbols:
+        for name in (f"{symbol}_premium.json", f"{symbol}_open_interest.json"):
+            path = base / name
+            if not path.exists():
+                missing.append(str(path))
+        for timeframe in timeframes:
+            path = base / f"{symbol}_{timeframe}_klines.json"
+            if not path.exists():
+                missing.append(str(path))
+    return missing
 
 
 def main() -> None:
@@ -58,6 +74,21 @@ def main() -> None:
 
     symbols = [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
     timeframes = [t.strip() for t in args.timeframes.split(",") if t.strip()]
+
+    missing_files = list_missing_cache_files(args.cache_dir, symbols, timeframes)
+    if missing_files:
+        print(
+            json.dumps(
+                {
+                    "type": "OPTIMIZATION_SKIPPED",
+                    "reason": "MISSING_CACHE_FILES",
+                    "cache_dir": str(Path(args.cache_dir).resolve()),
+                    "missing_count": len(missing_files),
+                    "missing_files": missing_files[:12],
+                }
+            )
+        )
+        raise SystemExit(3)
 
     datasets = load_market_datasets_from_cache(args.cache_dir, symbols, timeframes)
     if args.max_candles > 0:

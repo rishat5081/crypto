@@ -59,10 +59,6 @@ class LiveAdaptivePaperTrader:
             mock_seed=int(ds.get("mock_seed", 42)),
         )
 
-        # Binance order executor (demo or live)
-        self.executor = BinanceExecutor.from_env(config)
-        self._close_orphaned_positions()
-
         self.strategy_payload = copy.deepcopy(config["strategy"])
         self.base_strategy = StrategyEngine.from_dict(copy.deepcopy(config["strategy"]))
 
@@ -125,6 +121,28 @@ class LiveAdaptivePaperTrader:
         self.enable_break_even = bool(live_cfg.get("enable_break_even", True))
         self.break_even_trigger_r = float(live_cfg.get("break_even_trigger_r", 0.5))
         self.break_even_offset_r = float(live_cfg.get("break_even_offset_r", 0.02))
+        self.crossover_score_multiplier = float(live_cfg.get("crossover_score_multiplier", 0.88))
+        self.pullback_score_multiplier = float(live_cfg.get("pullback_score_multiplier", 1.03))
+        self.disabled_signal_types = {str(v).strip().upper() for v in live_cfg.get("disabled_signal_types", []) if str(v).strip()}
+        self.crossover_min_trend_strength = float(live_cfg.get("crossover_min_trend_strength", self.min_trend_strength))
+        self.crossover_min_confidence = float(live_cfg.get("crossover_min_confidence", self.min_candidate_confidence))
+        self.crossover_execute_min_confidence = float(
+            live_cfg.get("crossover_execute_min_confidence", max(self.execute_min_confidence, self.crossover_min_confidence))
+        )
+        self.crossover_execute_min_expectancy_r = float(
+            live_cfg.get("crossover_execute_min_expectancy_r", max(self.execute_min_expectancy_r, self.min_candidate_expectancy_r))
+        )
+        self.crossover_execute_min_score = float(
+            live_cfg.get("crossover_execute_min_score", max(self.execute_min_score, self.crossover_score_multiplier))
+        )
+        self.crossover_execute_min_win_probability = float(
+            live_cfg.get("crossover_execute_min_win_probability", self.execute_min_win_probability)
+        )
+        self.min_symbol_quality_for_entry = float(live_cfg.get("min_symbol_quality_for_entry", 0.55))
+        self.min_symbol_history_for_entry = int(live_cfg.get("min_symbol_history_for_entry", 3))
+        self.min_symbol_win_rate_for_entry = float(live_cfg.get("min_symbol_win_rate_for_entry", 0.40))
+        self.min_symbol_expectancy_r_for_entry = float(live_cfg.get("min_symbol_expectancy_r_for_entry", -0.02))
+        self.min_open_interest_notional_usd = float(live_cfg.get("min_open_interest_notional_usd", 0.0))
         self.enable_trailing_stop = bool(live_cfg.get("enable_trailing_stop", True))
         self.trail_trigger_r = float(live_cfg.get("trail_trigger_r", 0.2))
         self.trail_keep_pct = float(live_cfg.get("trail_keep_pct", 0.7))
@@ -134,6 +152,12 @@ class LiveAdaptivePaperTrader:
         self.min_progress_r_for_stagnation = float(live_cfg.get("min_progress_r_for_stagnation", 0.10))
         self.momentum_reversal_bars = int(live_cfg.get("momentum_reversal_bars", 3))
         self.momentum_reversal_r = float(live_cfg.get("momentum_reversal_r", -0.4))
+        self.close_orphaned_positions_on_startup = bool(live_cfg.get("close_orphaned_positions_on_startup", False))
+        self.reentry_cooldown_cycles = int(live_cfg.get("reentry_cooldown_cycles", 4))
+        self.fast_exit_reentry_cooldown_cycles = int(
+            live_cfg.get("fast_exit_reentry_cooldown_cycles", max(self.reentry_cooldown_cycles + 2, 6))
+        )
+        self.fast_exit_minutes_threshold = float(live_cfg.get("fast_exit_minutes_threshold", 8.0))
         guard_cfg = live_cfg.get("performance_guard", {})
         self.guard_enabled = bool(guard_cfg.get("enabled", True))
         self.guard_symbol_window = int(guard_cfg.get("rolling_window_trades", 12))
@@ -182,6 +206,11 @@ class LiveAdaptivePaperTrader:
         self.no_trade_filter_block_streak = 0
         self.filter_rejections: Dict[str, int] = defaultdict(int)
         self.open_trades: Dict[str, ManagedTrade] = {}
+        self._emitted_trade_result_keys: set[str] = set()
+
+        # Binance order executor (demo or live)
+        self.executor = BinanceExecutor.from_env(config)
+        self._close_orphaned_positions()
 
     @staticmethod
     def _normalize_symbols(symbols: List[str]) -> List[str]:
@@ -492,7 +521,7 @@ class LiveAdaptivePaperTrader:
         }
 
     def _close_orphaned_positions(self) -> None:
-        """Close any Binance positions left open from a previous crash/restart."""
+        """Inspect Binance positions left open from a previous crash/restart."""
         if not self.executor.enabled:
             return
         try:
@@ -509,13 +538,27 @@ class LiveAdaptivePaperTrader:
                     json.dumps({
                         "type": "BINANCE_ORDER",
                         "time": self._now_iso(),
-                        "action": "ORPHAN_CLOSE",
+                        "action": "ORPHAN_DETECTED",
                         "symbol": symbol,
                         "side": side,
                         "pnl": pnl,
+                        "auto_close_enabled": self.close_orphaned_positions_on_startup,
                     })
                 )
-                self.executor.close_trade(symbol, side, "ORPHAN_CLEANUP")
+                if self.close_orphaned_positions_on_startup:
+                    close_result = self.executor.close_trade(symbol, side, "ORPHAN_CLEANUP")
+                    print(
+                        json.dumps(
+                            {
+                                "type": "BINANCE_ORDER",
+                                "time": self._now_iso(),
+                                "action": "ORPHAN_CLOSE",
+                                "symbol": symbol,
+                                "side": side,
+                                "result": close_result,
+                            }
+                        )
+                    )
         except Exception as exc:
             print(
                 json.dumps({
@@ -565,8 +608,19 @@ class LiveAdaptivePaperTrader:
                     cost_r = self.cost_model.trade_cost_r(signal.entry, signal.stop_loss)
                     expectancy_r = (signal.confidence * rr) - ((1.0 - signal.confidence) * 1.0) - cost_r
                     symbol_quality = self._symbol_quality_factor(symbol)
+                    signal_type = self._signal_type_from_reason(signal.reason)
+                    quality_block = self._candidate_quality_block_reason(
+                        symbol=symbol,
+                        market=market,
+                        signal_type=signal_type,
+                        trend_strength=trend_strength,
+                        confidence=signal.confidence,
+                        symbol_quality=symbol_quality,
+                    )
+                    if quality_block is not None:
+                        continue
                     base_score = (signal.confidence * 0.65) + (trend_strength * 100.0 * 0.25) + ((rr - cost_r) * 0.10)
-                    score = base_score * symbol_quality
+                    score = base_score * symbol_quality * self._signal_score_multiplier(signal_type)
 
                     candidates.append(
                         CandidateSignal(
@@ -607,6 +661,131 @@ class LiveAdaptivePaperTrader:
         expectancy_component = (expectancy + 0.2) / 0.4
         quality = 0.55 + (win_rate * 0.35) + (expectancy_component * 0.10)
         return max(0.45, min(1.05, quality))
+
+    @staticmethod
+    def _signal_type_from_reason(reason: str) -> str:
+        upper = str(reason or "").upper()
+        if "PULLBACK" in upper:
+            return "PULLBACK"
+        if "MOMENTUM" in upper:
+            return "MOMENTUM"
+        if "CROSSOVER" in upper:
+            return "CROSSOVER"
+        return "UNKNOWN"
+
+    def _signal_score_multiplier(self, signal_type: str) -> float:
+        normalized = str(signal_type or "").upper()
+        if normalized == "PULLBACK":
+            return self.pullback_score_multiplier
+        if normalized == "CROSSOVER":
+            return self.crossover_score_multiplier
+        return 1.0
+
+    def _candidate_quality_block_reason(
+        self,
+        symbol: str,
+        market: MarketContext,
+        signal_type: str,
+        trend_strength: float,
+        confidence: float,
+        symbol_quality: float,
+    ) -> Optional[str]:
+        normalized_signal = str(signal_type or "").upper()
+        if normalized_signal in self.disabled_signal_types:
+            return f"signal_type_disabled:{normalized_signal.lower()}"
+
+        if normalized_signal == "CROSSOVER":
+            if trend_strength < self.crossover_min_trend_strength:
+                return "weak_crossover_trend"
+            if confidence < self.crossover_min_confidence:
+                return "weak_crossover_confidence"
+
+        if symbol_quality < self.min_symbol_quality_for_entry:
+            return "low_symbol_quality"
+
+        symbol_trades = self.symbol_recent_trades.get(symbol, [])
+        if len(symbol_trades) >= self.min_symbol_history_for_entry:
+            stats = self._stats(symbol_trades[-self.guard_symbol_window :])
+            if stats["win_rate"] < self.min_symbol_win_rate_for_entry:
+                return "low_symbol_win_rate"
+            if stats["expectancy_r"] < self.min_symbol_expectancy_r_for_entry:
+                return "low_symbol_expectancy"
+
+        oi_notional = float(market.open_interest or 0.0) * float(market.mark_price or 0.0)
+        if oi_notional < self.min_open_interest_notional_usd:
+            return "low_open_interest"
+
+        return None
+
+    @staticmethod
+    def _break_even_stop_price(side: str, entry: float, risk: float, offset_r: float) -> float:
+        if str(side or "").upper() == "SHORT":
+            return entry - (offset_r * risk)
+        return entry + (offset_r * risk)
+
+    @staticmethod
+    def _stop_state(managed: ManagedTrade) -> str:
+        if managed.trailing_stop_active:
+            return "TRAILING"
+        if managed.moved_to_break_even:
+            return "BREAKEVEN"
+        return "ORIGINAL"
+
+    @staticmethod
+    def _exit_type_from_reason(reason: str, result: str) -> str:
+        upper = str(reason or "").upper()
+        if "ADVERSE_CUT" in upper:
+            return "ADVERSE_CUT"
+        if "MOMENTUM_REVERSAL" in upper:
+            return "MOMENTUM_REVERSAL"
+        if "STAGNATION" in upper:
+            return "STAGNATION_EXIT"
+        if "TIMEOUT" in upper:
+            return "TIMEOUT_EXIT"
+        if "NETWORK_ERROR" in upper:
+            return "NETWORK_ERROR_EXIT"
+        result_upper = str(result or "").upper()
+        if result_upper == "WIN":
+            return "DIRECT_TP"
+        if result_upper == "LOSS":
+            return "DIRECT_SL"
+        return "DIRECT_EXIT"
+
+    @staticmethod
+    def _hold_minutes(closed: ClosedTrade) -> Optional[float]:
+        try:
+            opened = int(closed.opened_at_ms)
+            closed_at = int(closed.closed_at_ms)
+        except (TypeError, ValueError):
+            return None
+        if closed_at <= opened:
+            return None
+        return round((closed_at - opened) / 60000.0, 4)
+
+    def _build_trade_meta(self, managed: ManagedTrade, closed: ClosedTrade) -> Dict[str, object]:
+        return {
+            "signal_type": self._signal_type_from_reason(closed.reason),
+            "exit_type": self._exit_type_from_reason(closed.reason, closed.result),
+            "stop_state": self._stop_state(managed),
+            "hold_minutes": self._hold_minutes(closed),
+        }
+
+    @staticmethod
+    def _trade_result_key(closed: ClosedTrade) -> str:
+        return (
+            f"{closed.symbol}|{closed.timeframe}|{closed.side}|"
+            f"{closed.opened_at_ms}|{closed.closed_at_ms}|{round(float(closed.exit_price), 8)}"
+        )
+
+    def _post_close_cooldown_cycles(self, closed: ClosedTrade, trade_meta: Dict[str, object]) -> int:
+        cooldown = max(0, self.reentry_cooldown_cycles)
+        hold_minutes = trade_meta.get("hold_minutes")
+        exit_type = str(trade_meta.get("exit_type") or "").upper()
+        if isinstance(hold_minutes, (int, float)) and float(hold_minutes) <= self.fast_exit_minutes_threshold:
+            cooldown = max(cooldown, self.fast_exit_reentry_cooldown_cycles)
+        if exit_type in {"ADVERSE_CUT", "STAGNATION_EXIT", "MOMENTUM_REVERSAL", "TIMEOUT_EXIT"}:
+            cooldown = max(cooldown, self.fast_exit_reentry_cooldown_cycles)
+        return cooldown
 
     @staticmethod
     def _clamp(value: float, low: float, high: float) -> float:
@@ -831,13 +1010,12 @@ class LiveAdaptivePaperTrader:
 
                     elif self.enable_break_even and (not moved_to_break_even) and best_r >= self.break_even_trigger_r:
                         risk = max(abs(active.entry - active.stop_loss), 1e-9)
+                        be_stop = self._break_even_stop_price(active.side, active.entry, risk, self.break_even_offset_r)
                         if active.side == "LONG":
-                            be_stop = active.entry + (self.break_even_offset_r * risk)
                             if be_stop > active.stop_loss:
                                 active.stop_loss = be_stop
                                 moved_to_break_even = True
                         else:
-                            be_stop = active.entry + (self.break_even_offset_r * risk)
                             if be_stop < active.stop_loss:
                                 active.stop_loss = be_stop
                                 moved_to_break_even = True
@@ -1194,11 +1372,51 @@ class LiveAdaptivePaperTrader:
             )
         return binance_closed
 
-    def _finalize_closed_trade(self, closed: ClosedTrade, cycle: int, binance_opened: bool, binance_closed: bool) -> None:
+    def _finalize_closed_trade(
+        self,
+        managed: ManagedTrade,
+        closed: ClosedTrade,
+        cycle: int,
+        binance_opened: bool,
+        binance_closed: bool,
+    ) -> None:
+        trade_key = self._trade_result_key(closed)
+        if trade_key in self._emitted_trade_result_keys:
+            print(
+                json.dumps(
+                    {
+                        "type": "TRADE_RESULT_DUPLICATE_SKIPPED",
+                        "time": self._now_iso(),
+                        "cycle": cycle,
+                        "symbol": closed.symbol,
+                        "trade_key": trade_key,
+                    }
+                )
+            )
+            return
+        self._emitted_trade_result_keys.add(trade_key)
         self._record_trade(closed)
         self._apply_feedback(closed)
         self._apply_loss_guard(closed, cycle)
         self._apply_performance_guard(cycle)
+        trade_meta = self._build_trade_meta(managed, closed)
+        cooldown_cycles = self._post_close_cooldown_cycles(closed, trade_meta)
+        if cooldown_cycles > 0:
+            self.symbol_cooldowns[closed.symbol] = max(int(self.symbol_cooldowns.get(closed.symbol, 0)), cooldown_cycles)
+            print(
+                json.dumps(
+                    {
+                        "type": "SYMBOL_REENTRY_COOLDOWN_APPLIED",
+                        "time": self._now_iso(),
+                        "cycle": cycle,
+                        "symbol": closed.symbol,
+                        "cooldown_cycles": self.symbol_cooldowns[closed.symbol],
+                        "trade_key": trade_key,
+                        "exit_type": trade_meta.get("exit_type"),
+                        "hold_minutes": trade_meta.get("hold_minutes"),
+                    }
+                )
+            )
         print(
             json.dumps(
                 {
@@ -1206,6 +1424,8 @@ class LiveAdaptivePaperTrader:
                     "time": self._now_iso(),
                     "cycle": cycle,
                     "trade": asdict(closed),
+                    "trade_key": trade_key,
+                    "trade_meta": trade_meta,
                     "summary": self._summary(),
                     "binance_executed": binance_opened,
                     "binance_closed": binance_closed,
@@ -1294,13 +1514,12 @@ class LiveAdaptivePaperTrader:
 
         elif self.enable_break_even and (not managed.moved_to_break_even) and managed.best_r >= self.break_even_trigger_r:
             risk = max(abs(active.entry - active.stop_loss), 1e-9)
+            be_stop = self._break_even_stop_price(active.side, active.entry, risk, self.break_even_offset_r)
             if active.side == "LONG":
-                be_stop = active.entry + (self.break_even_offset_r * risk)
                 if be_stop > active.stop_loss:
                     active.stop_loss = be_stop
                     managed.moved_to_break_even = True
             else:
-                be_stop = active.entry + (self.break_even_offset_r * risk)
                 if be_stop < active.stop_loss:
                     active.stop_loss = be_stop
                     managed.moved_to_break_even = True
@@ -1355,7 +1574,7 @@ class LiveAdaptivePaperTrader:
                 continue
             binance_closed = self._close_binance_trade(closed)
             del self.open_trades[key]
-            self._finalize_closed_trade(closed, cycle, managed.binance_opened, binance_closed)
+            self._finalize_closed_trade(managed, closed, cycle, managed.binance_opened, binance_closed)
 
     def run(self) -> Dict:
         cycles = 0
@@ -1478,18 +1697,37 @@ class LiveAdaptivePaperTrader:
             execution_rejections: Dict[str, int] = defaultdict(int)
             open_trade_symbols = self._open_trade_symbols()
             for candidate in candidates:
-                if candidate.signal.confidence < self.execute_min_confidence:
+                signal_type = self._signal_type_from_reason(candidate.signal.reason)
+                is_crossover = signal_type == "CROSSOVER"
+                min_confidence = self.crossover_execute_min_confidence if is_crossover else self.execute_min_confidence
+                min_expectancy_r = (
+                    self.crossover_execute_min_expectancy_r if is_crossover else self.execute_min_expectancy_r
+                )
+                min_score = self.crossover_execute_min_score if is_crossover else self.execute_min_score
+
+                if candidate.signal.confidence < min_confidence:
                     execution_rejections["execute_confidence"] += 1
+                    if is_crossover:
+                        execution_rejections["execute_crossover_confidence"] += 1
                     continue
-                if candidate.expectancy_r < self.execute_min_expectancy_r:
+                if candidate.expectancy_r < min_expectancy_r:
                     execution_rejections["execute_expectancy"] += 1
+                    if is_crossover:
+                        execution_rejections["execute_crossover_expectancy"] += 1
                     continue
-                if candidate.score < self.execute_min_score:
+                if candidate.score < min_score:
                     execution_rejections["execute_score"] += 1
+                    if is_crossover:
+                        execution_rejections["execute_crossover_score"] += 1
                     continue
                 win_probability = candidate_win_prob.get(id(candidate), self._estimate_win_probability(candidate))
-                if win_probability < self.execute_min_win_probability:
+                min_win_probability = (
+                    self.crossover_execute_min_win_probability if is_crossover else self.execute_min_win_probability
+                )
+                if win_probability < min_win_probability:
                     execution_rejections["execute_win_probability"] += 1
+                    if is_crossover:
+                        execution_rejections["execute_crossover_win_probability"] += 1
                     continue
                 if self.require_dual_timeframe_confirm:
                     if len(confirmations.get((candidate.signal.symbol, candidate.signal.side), set())) < 2:
@@ -1640,6 +1878,8 @@ class LiveAdaptivePaperTrader:
                                 "result": exec_result,
                             })
                         )
+                        if not binance_opened:
+                            continue
                     except Exception as exc:
                         print(
                             json.dumps({

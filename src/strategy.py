@@ -24,6 +24,9 @@ class StrategyParameters:
     short_rsi_min: float
     short_rsi_max: float
     crossover_lookback: int = 5
+    crossover_min_trend_strength: float = 0.0
+    crossover_long_rsi_min: float = 0.0
+    crossover_short_rsi_max: float = 100.0
     ema_trend: int = 0  # 0 = disabled; set to e.g. 200 to only trade with macro trend
 
 
@@ -49,6 +52,9 @@ class StrategyEngine:
             short_rsi_min=float(payload["short_rsi_min"]),
             short_rsi_max=float(payload["short_rsi_max"]),
             crossover_lookback=int(payload.get("crossover_lookback", 5)),
+            crossover_min_trend_strength=float(payload.get("crossover_min_trend_strength", 0.0)),
+            crossover_long_rsi_min=float(payload.get("crossover_long_rsi_min", payload["long_rsi_min"])),
+            crossover_short_rsi_max=float(payload.get("crossover_short_rsi_max", payload["short_rsi_max"])),
             ema_trend=int(payload.get("ema_trend", 0)),
         )
         return cls(params)
@@ -97,6 +103,10 @@ class StrategyEngine:
                            for j in range(len(recent_diffs) - 1))
         bearish_cross = any(recent_diffs[j] >= 0 and recent_diffs[j + 1] < 0
                            for j in range(len(recent_diffs) - 1))
+        trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
+        if trend_strength < self.params.crossover_min_trend_strength:
+            bullish_cross = False
+            bearish_cross = False
 
         # Momentum confirmation: find how many bars ago the crossover happened
         # and reject if price already moved >0.5 ATR from the crossover bar.
@@ -136,6 +146,7 @@ class StrategyEngine:
             and ema_fast_v > ema_slow_v
             and bullish_cross
             and self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max
+            and rsi_v >= self.params.crossover_long_rsi_min
             and entry >= ema_fast_v
             and abs(market.funding_rate) <= self.params.funding_abs_limit
         ):
@@ -145,6 +156,7 @@ class StrategyEngine:
             and ema_fast_v < ema_slow_v
             and bearish_cross
             and self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max
+            and rsi_v <= self.params.crossover_short_rsi_max
             and entry <= ema_fast_v
             and abs(market.funding_rate) <= self.params.funding_abs_limit
         ):
@@ -224,7 +236,6 @@ class StrategyEngine:
             stop_loss = entry + sl_distance
             take_profit = entry - (sl_distance * self.params.risk_reward)
 
-        trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
         trend_score = min(trend_strength / 0.002, 1.0)
         if side == "LONG":
             rsi_center = (self.params.long_rsi_min + self.params.long_rsi_max) / 2

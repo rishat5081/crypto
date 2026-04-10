@@ -3,7 +3,11 @@ import unittest
 from unittest.mock import patch
 
 from src.live_adaptive_trader import CandidateSignal, LiveAdaptivePaperTrader
-from src.models import Signal
+from src.models import Candle, MarketContext, Signal
+
+
+class _DisabledExecutor:
+    enabled = False
 
 
 def _config() -> dict:
@@ -49,7 +53,18 @@ def _config() -> dict:
     }
 
 
-def _candidate(symbol: str, confidence: float, expectancy_r: float, score: float) -> CandidateSignal:
+def _trader(cfg: dict | None = None) -> LiveAdaptivePaperTrader:
+    with patch("src.live_adaptive_trader.BinanceExecutor.from_env", return_value=_DisabledExecutor()):
+        return LiveAdaptivePaperTrader(cfg or _config())
+
+
+def _candidate(
+    symbol: str,
+    confidence: float,
+    expectancy_r: float,
+    score: float,
+    reason: str = "LONG pullback | test",
+) -> CandidateSignal:
     signal = Signal(
         symbol=symbol,
         timeframe="5m",
@@ -58,7 +73,7 @@ def _candidate(symbol: str, confidence: float, expectancy_r: float, score: float
         take_profit=101.0,
         stop_loss=99.0,
         confidence=confidence,
-        reason="test",
+        reason=reason,
         signal_time_ms=1,
     )
     return CandidateSignal(
@@ -76,7 +91,7 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
     def test_paper_risk_override_is_used(self) -> None:
         cfg = _config()
         cfg["account"]["paper_risk_usd"] = 5.0
-        trader = LiveAdaptivePaperTrader(cfg)
+        trader = _trader(cfg)
 
         self.assertEqual(trader.risk_usd, 5.0)
         self.assertEqual(trader.risk_sizing_mode, "paper_risk_usd")
@@ -85,7 +100,7 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
     def test_filter_rejection_telemetry_is_reported(self) -> None:
         cfg = _config()
         cfg["live_loop"]["require_dual_timeframe_confirm"] = True
-        trader = LiveAdaptivePaperTrader(cfg)
+        trader = _trader(cfg)
         candidates = [
             _candidate("CONFUSDT", confidence=0.60, expectancy_r=0.30, score=0.90),
             _candidate("EXPUSDT", confidence=0.80, expectancy_r=0.05, score=0.90),
@@ -138,7 +153,7 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
         cfg = _config()
         cfg["live_loop"]["invalid_symbol_failure_threshold"] = 1
         cfg["live_loop"]["symbols"] = ["BTCUSDT", "BADUSDT"]
-        trader = LiveAdaptivePaperTrader(cfg)
+        trader = _trader(cfg)
 
         printed = []
 
@@ -158,7 +173,7 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
         cfg = _config()
         cfg["live_loop"]["max_cycles"] = 2
         cfg["live_loop"]["max_open_trades"] = 2
-        trader = LiveAdaptivePaperTrader(cfg)
+        trader = _trader(cfg)
 
         cycle_candidates = [
             [_candidate("BTCUSDT", confidence=0.80, expectancy_r=0.30, score=0.90)],
@@ -183,6 +198,174 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
         open_events = [event for event in printed if event["type"] == "OPEN_TRADE"]
         self.assertEqual(len(open_events), 2)
         self.assertEqual([event["symbol"] for event in open_events], ["BTCUSDT", "ETHUSDT"])
+
+    def test_short_break_even_price_moves_below_entry(self) -> None:
+        trader = _trader(_config())
+        self.assertEqual(trader._break_even_stop_price("SHORT", 100.0, 2.0, 0.05), 99.9)
+
+    def test_signal_score_multiplier_penalizes_crossover_and_boosts_pullback(self) -> None:
+        trader = _trader(_config())
+        self.assertLess(trader._signal_score_multiplier("CROSSOVER"), 1.0)
+        self.assertGreater(trader._signal_score_multiplier("PULLBACK"), 1.0)
+
+    def test_finalize_closed_trade_emits_trade_meta(self) -> None:
+        trader = _trader(_config())
+        signal = Signal(
+            symbol="BTCUSDT",
+            timeframe="5m",
+            side="LONG",
+            entry=100.0,
+            take_profit=101.0,
+            stop_loss=99.0,
+            confidence=0.8,
+            reason="LONG pullback | test",
+            signal_time_ms=1,
+        )
+        managed = trader._make_managed_trade(signal, binance_opened=False)
+        managed.moved_to_break_even = True
+        managed.last_known_candles = [
+            Candle(
+                open_time_ms=1,
+                open=100.0,
+                high=100.8,
+                low=99.9,
+                close=100.6,
+                volume=10.0,
+                close_time_ms=300001,
+            )
+        ]
+        managed.engine.active_trade.stop_loss = 100.05
+        closed = trader._make_exit(managed, managed.last_known_candles[-1], "ADVERSE_CUT")
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.print", fake_print):
+            trader._finalize_closed_trade(managed, closed, 1, False, False)
+
+        event = next(item for item in printed if item["type"] == "TRADE_RESULT")
+        self.assertEqual(event["type"], "TRADE_RESULT")
+        self.assertEqual(event["trade_meta"]["signal_type"], "PULLBACK")
+        self.assertEqual(event["trade_meta"]["exit_type"], "ADVERSE_CUT")
+        self.assertEqual(event["trade_meta"]["stop_state"], "BREAKEVEN")
+
+    def test_candidate_quality_block_reason_rejects_weak_crossover(self) -> None:
+        trader = _trader(_config())
+        reason = trader._candidate_quality_block_reason(
+            symbol="BTCUSDT",
+            market=MarketContext(mark_price=100.0, funding_rate=0.0, open_interest=100000.0),
+            signal_type="CROSSOVER",
+            trend_strength=trader.crossover_min_trend_strength / 2.0,
+            confidence=0.9,
+            symbol_quality=1.0,
+        )
+        self.assertEqual(reason, "weak_crossover_trend")
+
+    def test_finalize_closed_trade_skips_duplicate_result_emission(self) -> None:
+        trader = _trader(_config())
+        signal = Signal(
+            symbol="BTCUSDT",
+            timeframe="5m",
+            side="LONG",
+            entry=100.0,
+            take_profit=101.0,
+            stop_loss=99.0,
+            confidence=0.8,
+            reason="LONG pullback | test",
+            signal_time_ms=1,
+        )
+        managed = trader._make_managed_trade(signal, binance_opened=False)
+        candle = Candle(
+            open_time_ms=1,
+            open=100.0,
+            high=100.8,
+            low=99.9,
+            close=100.6,
+            volume=10.0,
+            close_time_ms=300001,
+        )
+        closed = trader._make_exit(managed, candle, "ADVERSE_CUT")
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.print", fake_print):
+            trader._finalize_closed_trade(managed, closed, 1, False, False)
+            trader._finalize_closed_trade(managed, closed, 1, False, False)
+
+        self.assertEqual(sum(1 for event in printed if event["type"] == "TRADE_RESULT"), 1)
+        self.assertEqual(sum(1 for event in printed if event["type"] == "TRADE_RESULT_DUPLICATE_SKIPPED"), 1)
+
+    def test_finalize_closed_trade_applies_reentry_cooldown(self) -> None:
+        trader = _trader(_config())
+        signal = Signal(
+            symbol="BTCUSDT",
+            timeframe="5m",
+            side="LONG",
+            entry=100.0,
+            take_profit=101.0,
+            stop_loss=99.0,
+            confidence=0.8,
+            reason="LONG pullback | test",
+            signal_time_ms=1,
+        )
+        managed = trader._make_managed_trade(signal, binance_opened=False)
+        candle = Candle(
+            open_time_ms=1,
+            open=100.0,
+            high=100.8,
+            low=99.9,
+            close=100.6,
+            volume=10.0,
+            close_time_ms=300001,
+        )
+        closed = trader._make_exit(managed, candle, "STAGNATION_EXIT")
+
+        with patch("src.live_adaptive_trader.print", lambda *_: None):
+            trader._finalize_closed_trade(managed, closed, 1, False, False)
+
+        self.assertEqual(trader.symbol_cooldowns["BTCUSDT"], trader.fast_exit_reentry_cooldown_cycles)
+
+    def test_crossover_execution_gate_blocks_marginal_setup(self) -> None:
+        cfg = _config()
+        cfg["live_loop"]["crossover_min_confidence"] = 0.84
+        cfg["live_loop"]["crossover_execute_min_confidence"] = 0.84
+        cfg["live_loop"]["crossover_execute_min_expectancy_r"] = 0.32
+        cfg["live_loop"]["crossover_execute_min_score"] = 0.86
+        cfg["live_loop"]["crossover_execute_min_win_probability"] = 0.72
+        trader = _trader(cfg)
+        candidates = [
+            _candidate(
+                "BTCUSDT",
+                confidence=0.84,
+                expectancy_r=0.24,
+                score=0.84,
+                reason="LONG crossover | test",
+            )
+        ]
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.time.sleep", lambda *_: None), patch(
+            "src.live_adaptive_trader.print", fake_print
+        ):
+            trader._refresh_batch_market_data = lambda: None
+            trader._signal_candidates = lambda: candidates
+            trader._estimate_win_probability = lambda candidate: 0.70
+            result = trader.run()
+
+        self.assertEqual(result["status"], "MAX_CYCLES_REACHED")
+        no_signal = next(event for event in printed if event["type"] == "NO_SIGNAL")
+        self.assertEqual(no_signal["reason"], "EXECUTION_FILTER_BLOCK")
+        self.assertEqual(no_signal["execution_rejections"]["execute_expectancy"], 1)
+        self.assertEqual(no_signal["execution_rejections"]["execute_crossover_expectancy"], 1)
 
 
 if __name__ == "__main__":
