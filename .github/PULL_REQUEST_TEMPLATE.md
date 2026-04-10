@@ -18,7 +18,7 @@
 
 ## Testing
 
-- [ ] Unit tests pass (`pytest tests/ -v`)
+- [ ] Unit tests pass (`cd services/backend && pytest tests/ -v`)
 - [ ] Config validation passes
 - [ ] Manual testing with live market data
 - [ ] Dashboard UI verified

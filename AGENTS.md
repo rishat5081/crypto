@@ -1,236 +1,138 @@
 # AGENTS.md - AI Agent Handbook
 
-> This file provides structured context for AI coding agents working on this project.
-> It covers architecture, data flow, invariants, and how to safely make changes.
+> Current repo layout is service-oriented.
+> Backend lives in `services/backend`.
+> Frontend lives in `services/frontend`.
 
 ## Agent Quick Start
 
-1. Read `CLAUDE.md` first for project overview
-2. Read this file for deep technical context
-3. Run `pytest tests/ -v` before and after any change
-4. Never commit secrets, API keys, or large data files
-5. Output format is JSON Lines — every bot output line must be valid JSON
+1. Read this file first.
+2. Use the repo root `start.sh` as the main entrypoint.
+3. Backend config is `services/backend/config.json`.
+4. Run focused tests from `services/backend`.
+5. Never commit secrets, API keys, `.env`, runtime files, or local caches.
 
-## System Architecture
+## Current Structure
 
-### Data Flow
-
+```text
+/
+├── start.sh
+├── package.json
+├── pnpm-workspace.yaml
+├── services/
+│   ├── backend/
+│   │   ├── .env
+│   │   ├── config.json
+│   │   ├── requirements.txt
+│   │   ├── pyproject.toml
+│   │   ├── start.sh
+│   │   ├── run_live_adaptive.py
+│   │   ├── run_ml_walkforward.py
+│   │   ├── run_retune_thresholds.py
+│   │   ├── src/
+│   │   └── tests/
+│   └── frontend/
+│       ├── package.json
+│       ├── vite.config.js
+│       ├── server.py
+│       ├── index.html
+│       └── src/
+└── .github/workflows/
 ```
+
+## Runtime Paths
+
+- Root launcher: `start.sh`
+- Backend launcher: `services/backend/start.sh`
+- Backend config: `services/backend/config.json`
+- Runtime event/control files: `/tmp/crypto-runtime`
+- Persistent trade history: MongoDB
+
+## Data Flow
+
+```text
 Binance Futures API
-    │
-    ├─ /fapi/v1/klines          → List[Candle]
-    ├─ /fapi/v1/premiumIndex    → MarketContext (mark_price, funding_rate, open_interest)
-    └─ /fapi/v1/ticker/price    → float (latest price)
-    │
-    ▼
-BinanceFuturesRestClient (src/binance_futures_rest.py)
-    │  - Retries across 3 base URLs
-    │  - Falls back to curl subprocess
-    │  - Optional mock data fallback
-    │
-    ▼
-StrategyEngine.evaluate() (src/strategy.py)
-    │  - Computes EMA(21), EMA(55), RSI(14), ATR(14)
-    │  - Detects: crossover / pullback / momentum
-    │  - Calculates confidence from weighted components
-    │  - Returns Signal with entry, TP, SL
-    │
-    ▼
-LiveAdaptivePaperTrader (src/live_adaptive_trader.py)
-    │  - Ranks candidates by score
-    │  - Applies execution filters
-    │  - Opens best trade via TradeEngine
-    │  - Monitors via _wait_for_close()
-    │  - Records result, applies feedback
-    │
-    ▼
-JSON Lines stdout → data/live_events.jsonl
-    │
-    ▼
-Dashboard Server (frontend/server.py)
-    │  - Reads JSONL, caches state
-    │  - Serves REST API
-    │  - Optional MongoDB persistence
-    │
-    ▼
-Browser Dashboard (frontend/index.html + app.js)
-    - Polls /api/state every 2 seconds
-    - Polls /api/analytics every 10 seconds
-    - Chart.js for equity, win rate, PnL distribution, drawdown
+    ↓
+services/backend/src/binance_futures_rest.py
+    ↓
+services/backend/src/strategy.py
+    ↓
+services/backend/src/live_adaptive_trader.py
+    ↓
+/tmp/crypto-runtime/live_events.jsonl
+    ↓
+services/frontend/server.py
+    ↓
+services/frontend/index.html + services/frontend/src/*
 ```
 
-### Class Hierarchy
+## Core Backend Modules
 
-```
-Models (src/models.py) — All frozen dataclasses except OpenTrade
-├── Candle          (open_time_ms, open, high, low, close, volume, close_time_ms)
-├── MarketContext   (mark_price, funding_rate, open_interest)
-├── Signal          (symbol, timeframe, side, entry, take_profit, stop_loss, confidence, reason, signal_time_ms)
-├── ClosedTrade     (symbol, timeframe, side, entry, take_profit, stop_loss, exit_price, result, opened_at_ms, closed_at_ms, pnl_r, pnl_usd, reason)
-└── OpenTrade       (mutable — stop_loss can be updated by trailing/break-even)
-    └── update_with_candle(candle, risk_usd) → Optional[ClosedTrade]
+- `services/backend/src/models.py`
+- `services/backend/src/indicators.py`
+- `services/backend/src/strategy.py`
+- `services/backend/src/trade_engine.py`
+- `services/backend/src/live_adaptive_trader.py`
+- `services/backend/src/binance_executor.py`
+- `services/backend/src/binance_futures_rest.py`
+- `services/backend/src/ml_pipeline.py`
+- `services/backend/src/config.py`
 
-StrategyEngine (src/strategy.py)
-├── from_dict(payload) → StrategyEngine     # Factory
-├── evaluate(symbol, tf, candles, market) → Optional[Signal]
-└── adaptive_tune_after_trade(result)
+## Invariants
 
-TradeEngine (src/trade_engine.py)
-├── maybe_open_trade(signal) → bool
-└── on_candle(candle) → Optional[ClosedTrade]
+1. `ClosedTrade.result` must reflect real PnL direction.
+2. When TP and SL hit in the same candle, SL wins.
+3. Only one open trade at a time unless code explicitly changes that invariant.
+4. JSON event output must stay valid line-by-line JSON.
+5. Execution filters must not become impossible to satisfy without a relaxation path.
+6. `original_stop_loss` must remain intact for risk accounting.
 
-LiveAdaptivePaperTrader (src/live_adaptive_trader.py)
-├── run() → Dict                            # Main entry
-├── _signal_candidates() → List[CandidateSignal]
-├── _wait_for_close(signal) → ClosedTrade
-├── _apply_feedback(trade)
-├── _apply_loss_guard(trade, cycle)
-├── _apply_performance_guard(cycle)
-└── _maybe_relax_execution_filters(cycle, count)
-```
+## Frontend/Backend Boundary
 
-## Invariants (Do NOT Break These)
-
-1. **`ClosedTrade.result` must reflect actual PnL**: If `pnl_r > 0`, result MUST be "WIN". This is enforced in `models.py:OpenTrade.update_with_candle()`.
-
-2. **Conservative fill order**: When both TP and SL are touched in the same candle, SL takes priority (assume worst case). This is in `models.py` lines 78-101.
-
-3. **One active trade at a time**: `TradeEngine.maybe_open_trade()` returns False if a trade is already open. The live loop processes one trade per cycle.
-
-4. **All bot output must be valid JSON Lines**: Every `print()` in `live_adaptive_trader.py` uses `json.dumps()`. Dashboard server parses these lines.
-
-5. **Execution filters must have relaxation floors**: If tightening makes filters unreachable, `_maybe_relax_execution_filters()` gradually lowers them back. Without this, the bot enters permanent "no trade" mode.
-
-6. **Feedback steps must be small**: Loss tightening uses tiny increments (e.g., +0.0015 confidence) to prevent filter lockout. Never increase these significantly.
-
-7. **`original_stop_loss` must be preserved**: `OpenTrade.__post_init__` saves the original SL. PnL calculation uses `original_stop_loss` for the risk denominator, even after trailing/break-even modify `stop_loss`.
-
-## Confidence Formula
-
-```python
-confidence = 0.10                          # Baseline
-           + (0.40 * trend_score)          # EMA separation / 0.002, clamped [0,1]
-           + (0.20 * rsi_score)            # Distance from RSI sweet spot
-           + (0.18 * vol_score)            # ATR position in allowed range
-           + (0.12 * funding_score)        # Low funding = high score
-
-# Then multiplied by signal type discount:
-# Crossover: 1.0x | Pullback: 0.92x | Momentum: 0.88x
-```
-
-## Score Formula
-
-```python
-score = ((confidence * 0.65)
-       + (trend_strength * 100.0 * 0.25)
-       + ((rr - cost_r) * 0.10))
-       * symbol_quality
-```
-
-## Win Probability Estimation
-
-```python
-setup_quality = (conf_component * 0.40) + (exp_component * 0.25)
-              + (trend_component * 0.15) + (quality_component * 0.12) + (rr_component * 0.08)
-
-blended = (setup_quality * 0.60) + (actual_symbol_win_rate * 0.40)
-calibrated = (blended * 0.92) + 0.02
-```
-
-## Exit Types (in priority order within _wait_for_close)
-
-| Exit | Trigger | Typical PnL |
-|------|---------|-------------|
-| TP Hit | Price reaches take_profit | +1.2R (full RR) |
-| SL Hit | Price reaches stop_loss | -1.0R |
-| Trailing Stop | SL moved into profit, then hit | +0.4 to +1.0R |
-| Adverse Cut | Worst intra-candle price exceeds max_adverse_r_cut (1.1R) | -1.1R |
-| Momentum Reversal | 3+ consecutive adverse bars AND now_r < -0.4R | -0.2 to -0.5R |
-| Stagnation | 6+ bars with best_r < 0.1R | ~0R |
-| Candle Timeout | 12 candles elapsed | varies |
-| Network Error | 5 consecutive API failures | varies |
-| Time Timeout | Hard safety cap (180 min) | varies |
-
-## Frontend Dashboard Sections
-
-| Section ID | Tab Name | Data Source |
-|-----------|----------|-------------|
-| `sect-overview` | Overview | `/api/state` |
-| `sect-analytics` | Analytics | `/api/analytics` |
-| `sect-opportunities` | Opportunities | `/api/state` (possible_trades) |
-| `sect-market` | Market | `/api/state` (snapshots) |
-| `sect-activity` | Activity | `/api/state` (logs) |
-| `sect-history` | History | `/api/history` |
-| News sidebar | Market News | `/api/news` |
-| Guard sidebar | Guard Monitor | `/api/state` (guard events) |
-
-## JSON Event Types (stdout output)
-
-| Type | When | Key Fields |
-|------|------|-----------|
-| `LIVE_MARKET` | Every cycle | `snapshots[]` with symbol, price |
-| `POSSIBLE_TRADES` | Every cycle | `trades[]`, `probability_categories` |
-| `OPEN_TRADE` | Trade opened | symbol, side, entry, tp, sl, confidence, score |
-| `TRADE_RESULT` | Trade closed | `trade{}` (ClosedTrade), `summary{}` |
-| `NO_SIGNAL` | No trade taken | `reason` (NO_CANDIDATES, EXECUTION_FILTER_BLOCK, etc.) |
-| `RISK_MANAGER_UPDATE` | SL modified | `action` (TRAILING_STOP_*, STOP_TO_BREAKEVEN, MOMENTUM_REVERSAL_EXIT) |
-| `LOSS_GUARD_SYMBOL_PAUSE` | Symbol paused | symbol, cooldown_cycles |
-| `LOSS_GUARD_GLOBAL_PAUSE` | Global pause | global_pause_cycles_left |
-| `GUARD_RETUNE` | Thresholds adjusted | direction (TIGHTEN/RELAX), previous, updated |
-| `EXECUTION_FILTER_RELAX` | Filters relaxed | before, after values |
-| `TRADE_MONITOR_FETCH_ERROR` | API failure during trade | symbol, error, consecutive_errors |
-
-## Testing Checklist
-
-Before any PR:
-```bash
-pytest tests/ -v                    # All 33 tests must pass
-python -c "import json; json.load(open('config.json'))"  # Config valid
-python -c "from src.strategy import StrategyEngine; from src.trade_engine import TradeEngine"  # Imports OK
-```
+- Frontend persistence and analytics should rely on MongoDB.
+- Temporary runtime event stream is allowed in `/tmp/crypto-runtime`.
+- Do not reintroduce persistent JSONL history inside the repo.
+- Backend should not assume frontend files are inside `services/backend`.
 
 ## File Modification Guide
 
 | If you're changing... | Also update... |
-|----------------------|---------------|
-| Signal generation logic | `tests/test_strategy.py`, CLAUDE.md signal types |
-| Trade exit logic | `tests/test_trade_engine.py` if TP/SL logic changes |
-| Config parameters | `tests/test_config.py` if new required keys |
-| API endpoints | `frontend/app.js` polling functions |
-| Dashboard HTML structure | `frontend/styles.css` + `frontend/app.js` |
-| Models (dataclass fields) | All files that import from models.py |
+|---|---|
+| Backend strategy logic | `services/backend/tests/test_strategy.py` |
+| Trade lifecycle / exits | `services/backend/tests/test_trade_engine.py`, `services/backend/tests/test_live_adaptive_trader.py` |
+| Backend config shape | `services/backend/tests/test_config.py` |
+| Frontend server endpoints | `services/backend/tests/test_frontend_server.py` |
+| Frontend UI | `services/frontend/src/*`, `services/frontend/index.html` if needed |
+| Root/startup flow | `start.sh`, `services/backend/start.sh`, workflows |
 
-## Specialized Agents
+## Standard Commands
 
-This project includes 15 specialized AI agent definitions in `.claude/agents/`. Each agent has deep project-specific context for the trading engine.
+### Backend
 
-| Agent | Path | Purpose |
-|-------|------|---------|
-| project-owner | `.claude/agents/project-owner/` | Audits and updates all agents when the project changes |
-| coder | `.claude/agents/coder/` | Signal strategies, trade management, dashboard |
-| security-auditor | `.claude/agents/security-auditor/` | No-real-orders guarantee, API safety |
-| performance | `.claude/agents/performance/` | Loop latency, signal speed, indicator caching |
-| standards-enforcer | `.claude/agents/standards-enforcer/` | Python style, naming, project structure |
-| reviewer | `.claude/agents/reviewer/` | Trading logic correctness, safety guarantees |
-| tester | `.claude/agents/tester/` | pytest, 33 tests, mock market data |
-| architect | `.claude/agents/architect/` | Module boundaries, state management, ML integration |
-| devops | `.claude/agents/devops/` | CI/CD, EC2 deployment, config validation |
-| code-analyzer | `.claude/agents/code-analyzer/` | live_adaptive_trader.py complexity, tech debt |
-| planner | `.claude/agents/planner/` | Trading feature decomposition, dependency order |
-| production-validator | `.claude/agents/production-validator/` | Safety scan, config readiness, no debug artifacts |
-| release-manager | `.claude/agents/release-manager/` | Safety-first releases, live test results |
-| issue-tracker | `.claude/agents/issue-tracker/` | Strategy area labels, priority triage |
-| ml-developer | `.claude/agents/ml-developer/` | Walk-forward optimization, classifier tuning |
+```bash
+cd services/backend
+pytest tests/ -v
+python -c "import json; json.load(open('config.json'))"
+python run_live_adaptive.py --config config.json
+```
 
-### Agent Usage
+### Frontend
 
-Each agent is defined as a Markdown file at `.claude/agents/<name>/<name>.md`. They are used by the Claude-Flow orchestration system defined in `claude-flow.config.json`.
+```bash
+pnpm install
+pnpm frontend:build
+pnpm frontend:dev
+```
 
-**Task routing** automatically assigns work to agents based on patterns:
-- Bug fixes → `coder` (primary) + `tester` (verification)
-- New features → `architect` (design) → `coder` (implement) → `tester` (test) → `reviewer` (review)
-- Security/safety → `security-auditor` (no-real-orders guarantee)
-- Performance/latency → `performance`
-- ML/optimization → `ml-developer` + `quant-researcher`
-- Releases → `release-manager` + `production-validator`
-- CI/CD/deployment → `devops`
+### Full stack
+
+```bash
+./start.sh --skip-optimize
+```
+
+## Notes For Agents
+
+- Prefer editing the moved service paths, not the deleted legacy paths.
+- Treat `services/backend/.env` as secret.
+- Ignore `services/frontend/node_modules` and compiled caches.
+- If updating workflows, keep root as the GitHub Actions checkout root, but use `services/backend` or `services/frontend` as working directories as appropriate.

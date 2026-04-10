@@ -1,0 +1,57 @@
+PROJECT: crypto
+
+CURRENT STRUCTURE
+- Root launcher: ./start.sh
+- Backend: services/backend
+- Frontend: services/frontend
+- Backend config: services/backend/config.json
+- Backend secrets: services/backend/.env
+- Runtime files: /tmp/crypto-runtime
+- Persistent history: MongoDB
+
+PRIMARY RULES
+- Edit service paths, not deleted legacy root paths.
+- Do not reintroduce repo-local runtime storage under data/.
+- Root start.sh is the main entrypoint.
+- services/backend/start.sh is a compatibility wrapper only.
+- Frontend history/analytics should rely on MongoDB, not repo JSONL archives.
+- Never commit secrets, .env files, runtime files, or caches.
+
+BACKEND HOTSPOTS
+- services/backend/src/live_adaptive_trader.py
+- services/backend/src/strategy.py
+- services/backend/src/trade_engine.py
+- services/backend/src/models.py
+- services/backend/src/binance_futures_rest.py
+- services/backend/src/binance_executor.py
+- services/backend/src/config.py
+
+FRONTEND HOTSPOTS
+- services/frontend/server.py
+- services/frontend/src/*
+- services/frontend/index.html
+
+IMPORTANT INVARIANTS
+- ClosedTrade.result must match actual pnl direction.
+- When TP and SL hit in the same candle, SL wins.
+- One open trade at a time unless intentionally changed.
+- Event output must remain valid JSON per line.
+- original_stop_loss must remain intact for risk accounting.
+
+DEFAULT COMMANDS
+- pnpm install
+- pnpm lint
+- pnpm frontend:dev
+- pnpm frontend:build
+- ./start.sh --skip-optimize
+- cd services/backend && pytest tests/ -v
+
+PERMISSIONS / EXPECTATIONS
+- Full local repo access is expected.
+- Network may be used when required for the project.
+- Prefer direct execution and implementation over planning-only responses.
+- Keep changes aligned with the current services architecture.
+
+READ FIRST
+- AGENTS.md
+- README.md

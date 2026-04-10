@@ -18,13 +18,14 @@ jobs:
       run:
         working-directory: services/backend
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: services/backend/requirements.txt
 
       - name: Install dependencies
         run: |
@@ -41,13 +42,16 @@ jobs:
     name: Frontend Lint & Build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: pnpm
+          cache-dependency-path: |
+            pnpm-lock.yaml
+            services/frontend/package.json
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -73,13 +77,14 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+          cache-dependency-path: services/backend/requirements.txt
 
       - name: Install dependencies
         run: pip install -r requirements.txt pytest pytest-cov
@@ -98,13 +103,14 @@ jobs:
       run:
         working-directory: services/backend
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: services/backend/requirements.txt
 
       - name: Install dependencies
         run: pip install -r requirements.txt

@@ -55,3 +55,7 @@ claude-flow.cache/
 /*/*/node_modules/
 /*/*/dist/
 node_modules/
+
+packages-lock.json
+package-lock.json
+yarn.lock

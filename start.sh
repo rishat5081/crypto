@@ -160,12 +160,16 @@ fi
 if [ "$START_FRONTEND" = "1" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
   sep
   log "Building frontend..."
-  if ! have_cmd npm; then
-    err "npm required to build frontend but not found."
+  if have_cmd pnpm; then
+    (cd "$ROOT_DIR" && pnpm install --no-frozen-lockfile && pnpm frontend:build) \
+      > /tmp/crypto_frontend_npm.log 2>&1
+  elif have_cmd npm; then
+    (cd "$FRONTEND_DIR" && npm install --silent && npm run build --silent) \
+      > /tmp/crypto_frontend_npm.log 2>&1
+  else
+    err "pnpm or npm is required to build frontend but neither was found."
     exit 1
   fi
-  (cd "$FRONTEND_DIR" && npm install --silent && npm run build --silent) \
-    > /tmp/crypto_frontend_npm.log 2>&1
   if [ -f "$FRONTEND_DIR/dist/index.html" ]; then
     FRONTEND_STATIC_DIR="$FRONTEND_DIR/dist"
     ok "Frontend build ready (dist/)"
