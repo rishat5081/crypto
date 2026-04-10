@@ -1,3 +1,5 @@
+/* global Chart */
+
 const REFRESH_MS = 2000;
 const NEWS_REFRESH_MS = 10000;
 const HISTORY_REFRESH_MS = 4000;

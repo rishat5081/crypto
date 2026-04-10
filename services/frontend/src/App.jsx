@@ -395,7 +395,9 @@ function useLiveDeskData() {
         const payload = await response.json();
         if (cancelled) return;
         startTransition(() => setBinance(payload));
-      } catch {}
+      } catch {
+        return;
+      }
     }
     tickBinance();
     const id = window.setInterval(tickBinance, 15000);
