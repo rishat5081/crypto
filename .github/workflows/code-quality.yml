@@ -10,14 +10,18 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: services/backend/requirements.txt
 
       - name: Install dependencies
         run: pip install -r requirements.txt pip-audit safety
@@ -31,11 +35,14 @@ jobs:
   complexity:
     name: Code Complexity
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
 

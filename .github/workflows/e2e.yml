@@ -13,21 +13,38 @@ jobs:
     name: Dashboard E2E
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: services/backend/requirements.txt
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r services/backend/requirements.txt
 
       - name: Start dashboard server
         run: |
-          cd frontend && python server.py --mongo-required 0 &
-          sleep 3
+          python services/frontend/server.py \
+            --host 127.0.0.1 \
+            --mongo-required 0 \
+            --config-file "$PWD/services/backend/config.json" \
+            --static-dir "$PWD/services/frontend" \
+            > /tmp/crypto_e2e_frontend.log 2>&1 &
+
+      - name: Wait for dashboard readiness
+        run: |
+          for i in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:8787/api/state > /dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "Dashboard did not become ready in time"
+          sed -n '1,220p' /tmp/crypto_e2e_frontend.log || true
+          exit 1
 
       - name: Verify dashboard responds
         run: |
@@ -42,8 +59,10 @@ jobs:
 
       - name: Upload logs on failure
         if: failure()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: e2e-logs
-          path: data/*.jsonl
+          path: |
+            /tmp/crypto-runtime/*.jsonl
+            /tmp/crypto_e2e_frontend.log
           retention-days: 7

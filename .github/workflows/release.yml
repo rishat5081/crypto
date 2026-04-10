@@ -12,16 +12,20 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: services/backend/requirements.txt
 
       - name: Install dependencies
         run: pip install -r requirements.txt pytest
@@ -31,31 +35,32 @@ jobs:
 
       - name: Build distribution
         run: |
-          mkdir -p dist
-          tar czf dist/crypto-trader-${{ github.ref_name }}.tar.gz \
+          mkdir -p ../../dist
+          tar czf ../../dist/crypto-trader-${{ github.ref_name }}.tar.gz \
             --exclude='.git' \
             --exclude='__pycache__' \
             --exclude='.pytest_cache' \
-            --exclude='data/*.jsonl' \
+            --exclude='services/frontend/node_modules' \
+            --exclude='services/frontend/dist' \
             --exclude='dist' \
             --exclude='.venv' \
-            .
+            ../../
 
       - name: Generate changelog
         id: changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
           if [ -n "$PREV_TAG" ]; then
-            echo "## Changes since $PREV_TAG" > CHANGELOG.md
-            git log $PREV_TAG..HEAD --pretty=format:"- %s (%h)" >> CHANGELOG.md
+            echo "## Changes since $PREV_TAG" > ../../RELEASE_CHANGELOG.md
+            git log $PREV_TAG..HEAD --pretty=format:"- %s (%h)" >> ../../RELEASE_CHANGELOG.md
           else
-            echo "## Initial Release" > CHANGELOG.md
-            git log --pretty=format:"- %s (%h)" -20 >> CHANGELOG.md
+            echo "## Initial Release" > ../../RELEASE_CHANGELOG.md
+            git log --pretty=format:"- %s (%h)" -20 >> ../../RELEASE_CHANGELOG.md
           fi
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          body_path: CHANGELOG.md
+          body_path: ./RELEASE_CHANGELOG.md
           generate_release_notes: true

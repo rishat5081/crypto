@@ -1,287 +1,174 @@
-<p align="center">
-  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white" />
-  <img src="https://img.shields.io/badge/Binance-Futures-F0B90B?style=for-the-badge&logo=binance&logoColor=white" />
-  <img src="https://img.shields.io/badge/Chart.js-Analytics-FF6384?style=for-the-badge&logo=chartdotjs" />
-  <img src="https://img.shields.io/badge/Trading-Paper_Only-orange?style=for-the-badge" />
-  <img src="https://img.shields.io/badge/60_Symbols-Monitored-6E9F18?style=for-the-badge" />
-  <img src="https://img.shields.io/github/actions/workflow/status/rishat5081/crypto/ci.yml?style=for-the-badge&label=CI" />
-</p>
+# Crypto Services Workspace
 
-<h1 align="center">📈 Crypto TP/SL Trading System</h1>
-<p align="center"><strong>Real-time cryptocurrency signal engine with adaptive TP/SL management, live dashboard, and analytics</strong></p>
+Service-oriented crypto trading workspace with a Python backend, a React/Vite frontend, MongoDB-backed dashboard history, and temporary runtime files under `/tmp/crypto-runtime`.
 
----
+## Structure
 
-## 🌟 Overview
-
-A data-only crypto futures signal system that monitors Binance Futures markets in real-time, generates LONG/SHORT signals using technical analysis, and tracks paper trade performance with adaptive strategy tuning. No real orders are placed.
-
-### 🎯 Key Features
-
-- 📊 **Multi-Strategy Signal Engine** - EMA crossover, pullback entry, and trend momentum signals
-- 🔄 **Adaptive Feedback Loop** - Strategy parameters auto-adjust after each trade result
-- 🖥️ **Live Dashboard** - Real-time monitoring with Chart.js analytics, trade history, and market news
-- 🛡️ **Risk Management** - Trailing stops, break-even stops, momentum reversal exits, and stagnation detection
-- 🔍 **Multi-Coin Scanning** - Simultaneous monitoring of 60 symbols across 5 categories (large cap, DeFi, L2, gaming, AI/infra)
-- 🚨 **Loss Guard System** - Automatic cooldowns after consecutive losses with threshold tightening
-- 📈 **Performance Analytics** - Equity curve, drawdown, win rate, PnL distribution, and per-symbol breakdown
-
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────┐
-│                   Live Dashboard                     │
-│         (HTML/CSS/JS + Chart.js)                     │
-│  Overview | Analytics | Opportunities | Market       │
-│  Activity | History | News | Guard Monitor           │
-└─────────────┬───────────────────────────┬───────────┘
-              │ HTTP API                  │ WebSocket
-┌─────────────▼───────────────────────────▼───────────┐
-│              Dashboard Server (server.py)             │
-│  /api/state | /api/analytics | /api/history          │
-│  /api/news  | /api/symbols   | /api/config           │
-└─────────────┬───────────────────────────────────────┘
-              │ JSON Lines
-┌─────────────▼───────────────────────────────────────┐
-│          Live Adaptive Trader                        │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
-│  │ Strategy │  │  Trade   │  │  Risk Manager    │   │
-│  │  Engine  │→ │  Engine  │→ │  (Trail/BE/Cut)  │   │
-│  └──────────┘  └──────────┘  └──────────────────┘   │
-│  ┌──────────┐  ┌──────────┐  ┌──────────────────┐   │
-│  │ Feedback │  │  Loss    │  │  Performance     │   │
-│  │  System  │  │  Guard   │  │  Guard           │   │
-│  └──────────┘  └──────────┘  └──────────────────┘   │
-└─────────────┬───────────────────────────────────────┘
-              │ REST API
-┌─────────────▼───────────────────────────────────────┐
-│         Binance Futures (Public Data Only)            │
-│  /fapi/v1/klines | /fapi/v1/premiumIndex             │
-│  /fapi/v1/ticker/price                               │
-└─────────────────────────────────────────────────────┘
+```text
+.
+├── start.sh
+├── package.json
+├── pnpm-workspace.yaml
+├── AGENTS.md
+├── services/
+│   ├── backend/
+│   │   ├── .env
+│   │   ├── config.json
+│   │   ├── requirements.txt
+│   │   ├── run_live_adaptive.py
+│   │   ├── run_ml_walkforward.py
+│   │   ├── run_retune_thresholds.py
+│   │   ├── src/
+│   │   └── tests/
+│   └── frontend/
+│       ├── package.json
+│       ├── server.py
+│       ├── index.html
+│       ├── src/
+│       └── dist/
+└── .github/workflows/
 ```
 
-## 🛠️ Tech Stack
+## Runtime Model
 
-| | Component | Technology |
-|---|-----------|-----------|
-| 🐍 | **Backend** | Python 3.11+ |
-| 🧠 | **Signal Engine** | Custom EMA/RSI/ATR strategy with adaptive tuning |
-| 📡 | **Data Source** | Binance Futures REST API (public endpoints) |
-| 🖥️ | **Dashboard** | Vanilla HTML/CSS/JS with Chart.js |
-| ⚡ | **API Server** | Python http.server |
-| 💾 | **Storage** | JSON Lines (file-based) + MongoDB (optional) |
-| 🤖 | **ML Pipeline** | Walk-forward optimizer with logistic classifier |
-| 🚀 | **Deployment** | systemd service with Docker MongoDB |
+- Root entrypoint: `./start.sh`
+- Backend config: `services/backend/config.json`
+- Backend secrets: `services/backend/.env`
+- Temporary runtime files: `/tmp/crypto-runtime`
+- Persistent trade history and dashboard analytics: MongoDB
+- No repo-local `data/` storage is used for runtime state anymore
 
-## ⚡ Quick Start
+## Quick Start
 
-### 🚀 One Command Setup
+### Full Stack
 
 ```bash
-git clone https://github.com/rishat5081/crypto.git
-cd crypto
-./run_all.sh
+pnpm install
+./start.sh --skip-optimize
 ```
 
-This will:
-1. Detect OS and install Python if needed
-2. Create virtualenv and install dependencies
-3. Start the dashboard at `http://127.0.0.1:8787`
-4. Run ML optimization on recent market data
-5. Start the live adaptive trading loop
-
-### 🔧 Manual Setup
+Useful flags:
 
 ```bash
-# Install dependencies
-python3 -m venv .venv && source .venv/bin/activate
+./start.sh --skip-optimize
+./start.sh --no-frontend
+./start.sh --no-browser
+./start.sh --restart
+```
+
+### Backend Only
+
+```bash
+cd services/backend
+python3 -m venv ../../.venv
+source ../../.venv/bin/activate
 pip install -r requirements.txt
-
-# Run tests
 pytest tests/ -v
-
-# Start dashboard
-cd frontend && python server.py &
-
-# Start live trading
 python run_live_adaptive.py --config config.json
 ```
 
-## ⚙️ Configuration
-
-All configuration is in `config.json`:
-
-| Section | Key Parameters |
-|---------|---------------|
-| **Strategy** | `ema_fast/slow`, `rsi_period`, `atr_multiplier`, `risk_reward`, `min_confidence` |
-| **Live Loop** | `symbols`, `timeframes`, `max_wait_candles`, `execute_min_*` thresholds |
-| **Risk** | `break_even_trigger_r`, `trail_trigger_r`, `max_adverse_r_cut`, `momentum_reversal_*` |
-| **Loss Guard** | `max_global_consecutive_losses`, `max_symbol_consecutive_losses`, pause cycles |
-| **Performance Guard** | `min_symbol_win_rate`, `rolling_window_trades`, cooldown settings |
-
-## 📡 Signal Types
-
-| Type | Trigger | Confidence |
-|------|---------|------------|
-| **Crossover** | EMA fast crosses slow within lookback window | Full |
-| **Pullback** | Price touches fast EMA in established trend | 0.92x |
-| **Momentum** | Price moving in trend direction with strong EMA separation | 0.88x |
-
-## 🖥️ Dashboard Sections
-
-| Section | Description |
-|---------|-------------|
-| **Overview** | Active trade, latest result, performance summary |
-| **Analytics** | Equity curve, rolling win rate, PnL distribution, drawdown charts |
-| **Opportunities** | Multi-coin candidate pool with probability buckets |
-| **Market** | Live price snapshot across all monitored symbols |
-| **Activity** | Per-coin status and system event logs |
-| **History** | Complete closed trade history |
-| **News** | Aggregated crypto market headlines |
-| **Guard** | Symbol health and adaptive retuning events |
-
-## 🔌 API Endpoints
-
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/state` | Current bot state (active trade, performance, signals) |
-| GET | `/api/analytics` | Full analytics (equity curve, drawdown, streaks, PnL) |
-| GET | `/api/history` | Closed trade history |
-| GET | `/api/news` | Market news headlines |
-| GET | `/api/symbols` | Searchable Binance symbol catalog |
-| GET | `/api/storage` | MongoDB connection status |
-| POST | `/api/config/symbols` | Update watchlist at runtime |
-
-## 📁 Project Structure
-
-```
-crypto/
-├── .github/                 # CI/CD workflows, templates, config
-├── src/
-│   ├── strategy.py          # Signal generation engine
-│   ├── trade_engine.py      # Paper trade lifecycle
-│   ├── models.py            # Data models
-│   ├── live_adaptive_trader.py  # Main trading loop
-│   ├── binance_futures_rest.py  # Binance API client
-│   ├── indicators.py        # Technical indicators
-│   ├── ml_pipeline.py       # ML walk-forward optimizer
-│   └── alerts.py            # Sound/terminal alerts
-├── frontend/
-│   ├── server.py            # Dashboard API server
-│   ├── index.html           # Dashboard UI
-│   ├── app.js               # Frontend logic + charts
-│   └── styles.css           # Dashboard styling
-├── tests/                   # Unit tests
-├── config.json              # Configuration
-├── run_all.sh               # One-command launcher
-├── run_live_adaptive.py     # Live trading entry point
-├── deploy_ec2.sh            # EC2 deployment script
-└── requirements.txt         # Python dependencies
-```
-
-## 🚀 Production Deployment
-
-### ☁️ EC2 (One Script)
+### Frontend Only
 
 ```bash
-chmod +x deploy_ec2.sh
-./deploy_ec2.sh
+pnpm install
+pnpm frontend:dev
+pnpm frontend:build
 ```
 
-Creates a systemd service with auto-restart:
+## Commands
+
+### Root
 
 ```bash
-sudo systemctl status crypto-trader
-sudo journalctl -u crypto-trader -f
-sudo systemctl restart crypto-trader
+pnpm install
+pnpm lint
+pnpm frontend:dev
+pnpm frontend:build
+./start.sh
 ```
 
-## 🔐 Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `FRONTEND_HOST` | `127.0.0.1` | Dashboard bind address |
-| `FRONTEND_PORT` | `8787` | Dashboard port |
-| `START_FRONTEND` | `1` | Enable/disable dashboard |
-| `MONGO_URI` | `mongodb://127.0.0.1:27017` | MongoDB connection |
-| `MONGO_DB` | `crypto_trading_live` | Database name |
-| `OPTIMIZE_TIMEOUT_SEC` | `45` | ML optimizer timeout |
-
-## 🧪 Testing
+### Backend Validation
 
 ```bash
-# Run all tests
+cd services/backend
 pytest tests/ -v
-
-# With coverage report
-pytest tests/ -v --cov=src --cov-report=html
-
-# Validate config
-python -c "import json; json.load(open('config.json')); print('OK')"
+python -c "import json; json.load(open('config.json'))"
+python -m py_compile run_live_adaptive.py src/strategy.py src/live_adaptive_trader.py
 ```
 
-## 📚 Documentation
+## Backend Overview
 
-| Document | Description |
-|----------|-------------|
-| [`docs/HANDBOOK.md`](docs/HANDBOOK.md) | Developer guide: setup, strategy deep-dive, trade lifecycle, deployment |
-| [`docs/OPTIMIZATION.md`](docs/OPTIMIZATION.md) | Win-rate optimization: root cause analysis, parameter changes, projections |
-| [`docs/API_REFERENCE.md`](docs/API_REFERENCE.md) | All REST endpoints with request/response schemas |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | System design, data flow, module dependencies, data models |
-| [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | Every `config.json` parameter with current values and rationale |
-| [`docs/LIVE_OPERATIONS.md`](docs/LIVE_OPERATIONS.md) | Live market monitoring, signal diagnosis, runtime control |
-| [`CHANGELOG.md`](CHANGELOG.md) | Version history and release notes |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Contribution guidelines and PR process |
+Core backend modules:
 
----
+- `services/backend/src/strategy.py`
+- `services/backend/src/live_adaptive_trader.py`
+- `services/backend/src/trade_engine.py`
+- `services/backend/src/models.py`
+- `services/backend/src/binance_futures_rest.py`
+- `services/backend/src/binance_executor.py`
+- `services/backend/src/ml_pipeline.py`
+- `services/backend/src/config.py`
 
-## 📊 Live System Results
+Primary backend scripts:
 
-Last live scan: **2026-03-25 UTC** — Binance Futures, **60 symbols × 1 timeframe (15m)**
+- `services/backend/run_live_adaptive.py`
+- `services/backend/run_ml_walkforward.py`
+- `services/backend/run_retune_thresholds.py`
 
-| Symbol | Price | Symbol | Price | Symbol | Price |
-|--------|-------|--------|-------|--------|-------|
-| BTC | $71,199 | LTC | $56.40 | UNI | $3.645 |
-| ETH | $2,171 | TRX | $0.308 | AAVE | $112.78 |
-| BNB | $646.57 | ETC | $8.639 | INJ | $3.068 |
-| XRP | $1.421 | XLM | $0.179 | OP | $0.113 |
-| SOL | $92.73 | ATOM | $1.791 | ARB | $0.098 |
-| ADA | $0.270 | ICP | $2.387 | NEAR | $1.274 |
-| DOGE | $0.098 | BCH | $477.75 | APT | $1.061 |
-| AVAX | $9.667 | ZEC | $238.42 | SUI | $0.958 |
-| DOT | $1.386 | XMR | $338.86 | HYPE | $40.18 |
-| LINK | $9.343 | YFI | $2,608 | ... | ... |
+## Frontend Overview
 
-> **60 symbols** across Large Cap, DeFi, Layer-2, Gaming/Metaverse, and AI/Infrastructure categories.
-> All verified live against Binance Futures API (2026-03-25).
+Frontend code lives in `services/frontend`:
 
----
+- React/Vite app in `services/frontend/src`
+- Python dashboard server in `services/frontend/server.py`
+- Static entry in `services/frontend/index.html`
 
-## 🤖 ML Performance (Walk-Forward)
+The frontend reads live runtime events from `/tmp/crypto-runtime/live_events.jsonl` and persistent trade history from MongoDB.
 
-| Metric | Value |
-|--------|-------|
-| Selected trades | 66 |
-| Win rate | 60.6% |
-| Expectancy-R | 0.38 |
-| High-hit backtest | 90% win rate (9/10 trades, 3 symbols, 15m) |
+## Environment
 
----
+Environment variables are loaded from `services/backend/.env`.
 
-## ⚠️ Disclaimer
+Common variables:
 
-This is a **decision-support tool** for educational and research purposes. It uses paper trading with live market data. No real orders are placed. No strategy guarantees profits. Use at your own risk. Keep API usage within exchange rate limits.
+- `FRONTEND_HOST`
+- `FRONTEND_PORT`
+- `MONGO_URI`
+- `MONGO_DB`
+- `MONGO_REQUIRED`
+- `CRYPTO_RUNTIME_DIR`
+- `BINANCE_API_KEY`
+- `BINANCE_SECRET_KEY`
 
-## 📄 License
+## Testing
 
-[MIT](LICENSE)
+Main test suite:
 
----
+```bash
+cd services/backend
+pytest tests/ -v
+```
 
-<p align="center">
-  Built with 🐍 Python &nbsp;·&nbsp; 📈 Binance API &nbsp;·&nbsp; 📊 Chart.js &nbsp;·&nbsp; 🤖 ML Pipeline
-</p>
-<p align="center">
-  <sub>Made by <a href="https://github.com/rishat5081">@rishat5081</a></sub>
-</p>
+Focused examples:
+
+```bash
+cd services/backend
+pytest tests/test_strategy.py -v
+pytest tests/test_live_adaptive_trader.py -v
+pytest tests/test_frontend_server.py -v
+```
+
+## GitHub Workflows
+
+The workflows in `.github/workflows/` assume:
+
+- repository root as checkout root
+- backend jobs run from `services/backend`
+- frontend jobs use root `pnpm`
+- runtime artifacts are collected from `/tmp/crypto-runtime`
+
+## Notes
+
+- Use `AGENTS.md` as the project-specific AI handbook.
+- Do not store runtime files in the repo.
+- Do not commit `.env`, runtime caches, or generated frontend artifacts unless explicitly intended.

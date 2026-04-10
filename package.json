@@ -1,0 +1,24 @@
+{
+  "name": "crypto-services-workspace",
+  "private": true,
+  "version": "1.0.0",
+  "packageManager": "pnpm@9.12.3",
+  "workspaces": [
+    "services/frontend"
+  ],
+  "scripts": {
+    "start": "./start.sh",
+    "frontend:dev": "pnpm --dir services/frontend dev",
+    "frontend:build": "pnpm --dir services/frontend build",
+    "frontend:preview": "pnpm --dir services/frontend preview",
+    "lint": "eslint services/frontend --ext .js,.jsx",
+    "lint:fix": "eslint services/frontend --ext .js,.jsx --fix"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.13.0",
+    "eslint": "^9.13.0",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "eslint-plugin-react-refresh": "^0.4.13",
+    "globals": "^15.11.0"
+  }
+}

@@ -10,6 +10,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BACKEND_DIR="$ROOT_DIR/services/backend"
 
 # ── Defaults ─────────────────────────────────────────────────────────
 OPEN_BROWSER=1
@@ -40,20 +41,19 @@ for arg in "$@"; do
 done
 
 # ── Load .env (Binance API keys etc) ─────────────────────────────────
-if [ -f "$ROOT_DIR/.env" ]; then
+if [ -f "$BACKEND_DIR/.env" ]; then
   set -a
-  source "$ROOT_DIR/.env"
+  source "$BACKEND_DIR/.env"
   set +a
 fi
 
 # ── Paths ────────────────────────────────────────────────────────────
 VENV_DIR="$ROOT_DIR/.venv"
-CACHE_DIR="$ROOT_DIR/data/live"
-FRONTEND_DIR="$ROOT_DIR/frontend"
+CACHE_DIR="${CRYPTO_RUNTIME_DIR:-/tmp/crypto-runtime}/live"
+FRONTEND_DIR="$ROOT_DIR/services/frontend"
 FRONTEND_STATIC_DIR="$FRONTEND_DIR"
-EVENTS_FILE="$ROOT_DIR/data/live_events.jsonl"
-HISTORY_FILE="$ROOT_DIR/data/live_events_history.jsonl"
-RUNTIME_CONTROL="$ROOT_DIR/data/runtime_control.json"
+EVENTS_FILE="${CRYPTO_RUNTIME_DIR:-/tmp/crypto-runtime}/live_events.jsonl"
+RUNTIME_CONTROL="${CRYPTO_RUNTIME_DIR:-/tmp/crypto-runtime}/runtime_control.json"
 DASHBOARD_URL="http://$FRONTEND_HOST:$FRONTEND_PORT"
 FRONTEND_PID=""
 PYTHON_CMD=""
@@ -75,7 +75,6 @@ emit_event() {
   [ "$START_FRONTEND" != "1" ] && return
   local now; now="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   printf '{"type":"RUN_STAGE","time":"%s","stage":"%s","message":"%s"}\n' "$now" "$1" "$2" >> "$EVENTS_FILE"
-  printf '{"type":"RUN_STAGE","time":"%s","stage":"%s","message":"%s"}\n' "$now" "$1" "$2" >> "$HISTORY_FILE"
 }
 
 # ── Banner ───────────────────────────────────────────────────────────
@@ -104,8 +103,8 @@ kill_pattern() {
   [ -n "$pids" ] && kill -9 $pids 2>/dev/null || true
 }
 
-kill_pattern "$ROOT_DIR/run_live_adaptive.py" "live trader"
-kill_pattern "$ROOT_DIR/run_ml_walkforward.py" "optimizer"
+kill_pattern "$BACKEND_DIR/run_live_adaptive.py" "live trader"
+kill_pattern "$BACKEND_DIR/run_ml_walkforward.py" "optimizer"
 kill_pattern "$FRONTEND_DIR/server.py"         "frontend server"
 
 if have_cmd lsof; then
@@ -128,11 +127,11 @@ fi
 PY_VER=$("$PYTHON_CMD" -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
 ok "Python $PY_VER"
 
-if [ ! -f "$ROOT_DIR/config.json" ]; then
-  err "config.json not found in $ROOT_DIR"
+if [ ! -f "$BACKEND_DIR/config.json" ]; then
+  err "config.json not found in $BACKEND_DIR"
   exit 1
 fi
-"$PYTHON_CMD" -c "import json; json.load(open('$ROOT_DIR/config.json'))" 2>/dev/null \
+"$PYTHON_CMD" -c "import json; json.load(open('$BACKEND_DIR/config.json'))" 2>/dev/null \
   && ok "config.json valid" \
   || { err "config.json is invalid JSON"; exit 1; }
 
@@ -153,7 +152,7 @@ ok "Virtual environment active"
 if [ "$AUTO_INSTALL_DEPS" = "1" ]; then
   log "Installing/verifying dependencies..."
   pip install --quiet --upgrade pip setuptools wheel
-  pip install --quiet -r "$ROOT_DIR/requirements.txt"
+  pip install --quiet -r "$BACKEND_DIR/requirements.txt"
   ok "Dependencies ready"
 fi
 
@@ -161,12 +160,16 @@ fi
 if [ "$START_FRONTEND" = "1" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
   sep
   log "Building frontend..."
-  if ! have_cmd npm; then
-    err "npm required to build frontend but not found."
+  if have_cmd pnpm; then
+    (cd "$ROOT_DIR" && pnpm install --no-frozen-lockfile && pnpm frontend:build) \
+      > /tmp/crypto_frontend_npm.log 2>&1
+  elif have_cmd npm; then
+    (cd "$FRONTEND_DIR" && npm install --silent && npm run build --silent) \
+      > /tmp/crypto_frontend_npm.log 2>&1
+  else
+    err "pnpm or npm is required to build frontend but neither was found."
     exit 1
   fi
-  (cd "$FRONTEND_DIR" && npm install --silent && npm run build --silent) \
-    > /tmp/crypto_frontend_npm.log 2>&1
   if [ -f "$FRONTEND_DIR/dist/index.html" ]; then
     FRONTEND_STATIC_DIR="$FRONTEND_DIR/dist"
     ok "Frontend build ready (dist/)"
@@ -176,11 +179,7 @@ if [ "$START_FRONTEND" = "1" ] && [ -f "$FRONTEND_DIR/package.json" ]; then
 fi
 
 # ── Prepare data dir ────────────────────────────────────────────────
-mkdir -p "$ROOT_DIR/data" "$CACHE_DIR"
-touch "$HISTORY_FILE"
-if [ -s "$EVENTS_FILE" ]; then
-  cat "$EVENTS_FILE" >> "$HISTORY_FILE"
-fi
+mkdir -p "$(dirname "$EVENTS_FILE")" "$CACHE_DIR"
 : > "$EVENTS_FILE"
 rm -f "$RUNTIME_CONTROL"
 
@@ -199,8 +198,7 @@ if [ "$START_FRONTEND" = "1" ]; then
     --host "$FRONTEND_HOST" \
     --port "$FRONTEND_PORT" \
     --events-file       "$EVENTS_FILE" \
-    --history-events-file "$HISTORY_FILE" \
-    --config-file       "$ROOT_DIR/config.json" \
+    --config-file       "$BACKEND_DIR/config.json" \
     --runtime-control-file "$RUNTIME_CONTROL" \
     --mongo-uri         "$MONGO_URI" \
     --mongo-db          "$MONGO_DB" \
@@ -248,8 +246,9 @@ else
   : > "$OPT_LOG"
 
   set +e
-  python "$ROOT_DIR/run_ml_walkforward.py" \
-    --config "$ROOT_DIR/config.json" \
+  OPT_TIMED_OUT=0
+  python "$BACKEND_DIR/run_ml_walkforward.py" \
+    --config "$BACKEND_DIR/config.json" \
     --cache-dir "$CACHE_DIR" \
     --timeframes 5m,15m \
     --target-trades 100 \
@@ -266,6 +265,7 @@ else
     log "  Optimizing... ${ELAPSED}s"
     emit_event "OPTIMIZING" "In progress (${ELAPSED}s)"
     if [ "$ELAPSED" -ge "$OPTIMIZE_TIMEOUT_SEC" ]; then
+      OPT_TIMED_OUT=1
       kill "$OPT_PID" 2>/dev/null || true
       sleep 1
       kill -0 "$OPT_PID" 2>/dev/null && kill -9 "$OPT_PID" 2>/dev/null || true
@@ -276,15 +276,22 @@ else
     fi
     sleep "$HEARTBEAT_SEC"
   done
-  wait "$OPT_PID" 2>/dev/null || true
+  wait "$OPT_PID" 2>/dev/null
+  OPT_STATUS=$?
   set -e
 
   if [ -s "$OPT_LOG" ]; then
     cat "$OPT_LOG" >> "$EVENTS_FILE" 2>/dev/null || true
-    cat "$OPT_LOG" >> "$HISTORY_FILE" 2>/dev/null || true
   fi
-  ok "Optimization step done"
-  emit_event "OPTIMIZATION_DONE" "Complete"
+  if [ "${OPT_TIMED_OUT:-0}" -eq 1 ]; then
+    warn "Optimization step timed out, continuing without updated walk-forward parameters"
+  elif [ "${OPT_STATUS:-0}" -eq 0 ]; then
+    ok "Optimization step done"
+    emit_event "OPTIMIZATION_DONE" "Complete"
+  else
+    warn "Optimization failed (exit $OPT_STATUS), continuing with current strategy parameters"
+    emit_event "OPTIMIZATION_FAILED" "Exit $OPT_STATUS, continuing"
+  fi
 fi
 
 # ── Threshold retune from history ────────────────────────────────────
@@ -296,9 +303,9 @@ if [ "$RETUNE_FROM_EVENTS" = "1" ]; then
   RETUNE_LOG="/tmp/crypto_retune.log"
   : > "$RETUNE_LOG"
   set +e
-  python "$ROOT_DIR/run_retune_thresholds.py" \
-    --config "$ROOT_DIR/config.json" \
-    --events-file "$HISTORY_FILE" \
+  python "$BACKEND_DIR/run_retune_thresholds.py" \
+    --config "$BACKEND_DIR/config.json" \
+    --events-file "$EVENTS_FILE" \
     --lookback-trades "$RETUNE_LOOKBACK_TRADES" \
     --min-trades "$RETUNE_MIN_TRADES" \
     --apply > "$RETUNE_LOG" 2>&1
@@ -307,7 +314,6 @@ if [ "$RETUNE_FROM_EVENTS" = "1" ]; then
 
   if [ -s "$RETUNE_LOG" ]; then
     cat "$RETUNE_LOG" >> "$EVENTS_FILE" 2>/dev/null || true
-    cat "$RETUNE_LOG" >> "$HISTORY_FILE" 2>/dev/null || true
   fi
 
   if [ "$RETUNE_STATUS" -eq 0 ]; then
@@ -337,7 +343,7 @@ cleanup() {
   sep
   log "Shutting down..."
   [ -n "${FRONTEND_PID:-}" ] && kill "$FRONTEND_PID" 2>/dev/null || true
-  pkill -f "$ROOT_DIR/run_live_adaptive.py" 2>/dev/null || true
+  pkill -f "$BACKEND_DIR/run_live_adaptive.py" 2>/dev/null || true
   ok "Stopped. Bye!"
 }
 trap cleanup EXIT INT TERM
@@ -345,8 +351,8 @@ trap cleanup EXIT INT TERM
 # ── Start trader — stream with coloured output ───────────────────────
 emit_event "LIVE_TRADING" "Live adaptive paper-trading started"
 
-python -u "$ROOT_DIR/run_live_adaptive.py" --config "$ROOT_DIR/config.json" --continuous \
-| tee -a "$EVENTS_FILE" "$HISTORY_FILE" \
+python -u "$BACKEND_DIR/run_live_adaptive.py" --config "$BACKEND_DIR/config.json" --continuous \
+| tee -a "$EVENTS_FILE" \
 | python3 -u -c "
 import sys, json
 
