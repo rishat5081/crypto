@@ -704,7 +704,13 @@ class EventStateCache:
 
 
 class TradeHistoryCache:
-    def __init__(self, history_file: Path, max_items: int = 2000, mongo_store: Optional[MongoStore] = None):
+    def __init__(
+        self,
+        history_file: Path,
+        max_items: int = 2000,
+        mongo_store: Optional[MongoStore] = None,
+        config_file: Optional[Path] = None,
+    ):
         self.history_file = history_file
         self.max_items = max(100, int(max_items))
         self.mongo_store = mongo_store
@@ -715,7 +721,11 @@ class TradeHistoryCache:
         self._keys: set[str] = set()
         self._open_trade_contexts: Dict[str, Dict[str, Any]] = {}
         self._binance_open_contexts: Dict[str, Dict[str, Any]] = {}
-        self._config_file = (self.history_file.parent.parent / "config.json").resolve()
+        self._config_file = (
+            Path(config_file).resolve()
+            if config_file is not None
+            else (self.history_file.parent.parent / "config.json").resolve()
+        )
 
     def _execution_cost_bps_total(self) -> float:
         try:
@@ -1999,10 +2009,10 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Crypto TP/SL frontend server")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
-    parser.add_argument("--events-file", default="../data/live_events.jsonl")
-    parser.add_argument("--history-events-file", default="../data/live_events_history.jsonl")
-    parser.add_argument("--config-file", default="../config.json")
-    parser.add_argument("--runtime-control-file", default="../data/runtime_control.json")
+    parser.add_argument("--events-file", default="/tmp/crypto-runtime/live_events.jsonl")
+    parser.add_argument("--history-events-file", default="")
+    parser.add_argument("--config-file", default="../backend/config.json")
+    parser.add_argument("--runtime-control-file", default="/tmp/crypto-runtime/runtime_control.json")
     parser.add_argument("--news-refresh-sec", type=int, default=10)
     parser.add_argument("--news-max-items", type=int, default=30)
     parser.add_argument("--mongo-uri", default="mongodb://127.0.0.1:27017")
@@ -2021,10 +2031,13 @@ def main() -> None:
         events_file = (script_dir / events_file).resolve()
     events_file.parent.mkdir(parents=True, exist_ok=True)
 
-    history_events_file = Path(args.history_events_file)
-    if not history_events_file.is_absolute():
-        history_events_file = (script_dir / history_events_file).resolve()
-    history_events_file.parent.mkdir(parents=True, exist_ok=True)
+    if args.history_events_file:
+        history_events_file = Path(args.history_events_file)
+        if not history_events_file.is_absolute():
+            history_events_file = (script_dir / history_events_file).resolve()
+        history_events_file.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        history_events_file = events_file
 
     config_file = Path(args.config_file)
     if not config_file.is_absolute():
@@ -2045,7 +2058,12 @@ def main() -> None:
     )
 
     cache = EventStateCache(events_file=events_file, mongo_store=mongo_store)
-    history_cache = TradeHistoryCache(history_file=history_events_file, max_items=5000, mongo_store=mongo_store)
+    history_cache = TradeHistoryCache(
+        history_file=history_events_file,
+        max_items=5000,
+        mongo_store=mongo_store,
+        config_file=config_file,
+    )
     config_store = ConfigStore(
         config_file=config_file,
         runtime_control_file=runtime_control_file,

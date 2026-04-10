@@ -10,6 +10,9 @@ jobs:
   audit:
     name: Security Audit
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend
     steps:
       - uses: actions/checkout@v6
 
@@ -31,6 +34,9 @@ jobs:
   complexity:
     name: Code Complexity
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/backend
     steps:
       - uses: actions/checkout@v6
 

@@ -93,7 +93,7 @@ def _round_live_cfg(live: Dict[str, Any]) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Retune live_loop thresholds using longer multi-coin trade history")
     parser.add_argument("--config", default="config.json", help="Path to config file")
-    parser.add_argument("--events-file", default="data/live_events.jsonl", help="Path to live events JSONL file")
+    parser.add_argument("--events-file", default="/tmp/crypto-runtime/live_events.jsonl", help="Path to live events JSONL file")
     parser.add_argument("--lookback-trades", type=int, default=300, help="Use most recent N closed trades")
     parser.add_argument("--min-trades", type=int, default=20, help="Minimum trade count required to retune")
     parser.add_argument("--apply", action="store_true", help="Write tuned values back to config")

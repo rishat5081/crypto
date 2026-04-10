@@ -22,11 +22,11 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r services/backend/requirements.txt
 
       - name: Start dashboard server
         run: |
-          cd frontend && python server.py --mongo-required 0 &
+          python services/frontend/server.py --mongo-required 0 --config-file services/backend/config.json --static-dir services/frontend &
           sleep 3
 
       - name: Verify dashboard responds
@@ -45,5 +45,5 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: e2e-logs
-          path: data/*.jsonl
+          path: /tmp/crypto-runtime/*.jsonl
           retention-days: 7

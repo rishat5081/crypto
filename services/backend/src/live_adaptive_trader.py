@@ -189,7 +189,7 @@ class LiveAdaptivePaperTrader:
 
         cfg_path = config.get("_config_path")
         root_dir = Path(cfg_path).resolve().parent if cfg_path else Path.cwd()
-        runtime_control_path = live_cfg.get("runtime_control_file", "data/runtime_control.json")
+        runtime_control_path = live_cfg.get("runtime_control_file", "/tmp/crypto-runtime/runtime_control.json")
         runtime_path = Path(runtime_control_path)
         if not runtime_path.is_absolute():
             runtime_path = (root_dir / runtime_path).resolve()

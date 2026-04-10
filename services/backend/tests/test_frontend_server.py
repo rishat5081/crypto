@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from frontend.server import AnalyticsEngine, EventStateCache, TradeHistoryCache
+from services.frontend.server import AnalyticsEngine, EventStateCache, TradeHistoryCache
 
 
 class TradeHistoryCacheTests(unittest.TestCase):
@@ -188,7 +188,7 @@ class TradeHistoryCacheTests(unittest.TestCase):
             ]
             history_file.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
 
-            cache = TradeHistoryCache(history_file=history_file, max_items=100)
+            cache = TradeHistoryCache(history_file=history_file, max_items=100, config_file=config_file)
             payload = cache.refresh(limit=20)
 
             self.assertEqual(payload["count"], 1)
@@ -254,7 +254,7 @@ class TradeHistoryCacheTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            cache = TradeHistoryCache(history_file=history_file, max_items=100)
+            cache = TradeHistoryCache(history_file=history_file, max_items=100, config_file=config_file)
             first = cache.refresh(limit=50)
 
             self.assertEqual(first["count"], 1)
@@ -365,7 +365,7 @@ class TradeHistoryCacheTests(unittest.TestCase):
             ]
             history_file.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
 
-            cache = TradeHistoryCache(history_file=history_file, max_items=100)
+            cache = TradeHistoryCache(history_file=history_file, max_items=100, config_file=config_file)
             engine = AnalyticsEngine(history_cache=cache)
             payload = engine.compute()
 

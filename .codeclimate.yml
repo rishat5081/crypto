@@ -1,0 +1,35 @@
+version: "2"
+
+plugins:
+  duplication:
+    enabled: true
+  fixme:
+    enabled: true
+
+exclude_patterns:
+  - ".venv/"
+  - "services/frontend/node_modules/"
+  - "services/frontend/dist/"
+  - "**/__pycache__/"
+  - "**/.pytest_cache/"
+
+checks:
+  file-lines:
+    config:
+      threshold: 800
+
+  method-lines:
+    config:
+      threshold: 80
+
+  method-complexity:
+    config:
+      threshold: 10
+
+  nested-control-flow:
+    config:
+      threshold: 4
+
+  return-statements:
+    config:
+      threshold: 6
