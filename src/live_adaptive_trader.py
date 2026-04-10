@@ -593,6 +593,13 @@ class LiveAdaptivePaperTrader:
     def _signal_candidates(self) -> List[CandidateSignal]:
         candidates: List[CandidateSignal] = []
         klines_window = self._get_klines_window()
+        rejection_summary: Dict[str, object] = {
+            "strategy_returned_none": 0,
+            "strategy_rejections": defaultdict(int),
+            "rr_below_floor": 0,
+            "trend_strength_below_min": 0,
+            "quality_blocked": defaultdict(int),
+        }
 
         for symbol in klines_window:
             if int(self.symbol_cooldowns.get(symbol, 0)) > 0:
@@ -610,13 +617,16 @@ class LiveAdaptivePaperTrader:
                     strategy_data = copy.deepcopy(self.strategy_payload)
                     strategy_data["min_confidence"] = self.symbol_confidence.get(symbol, strategy_data["min_confidence"])
                     strategy = StrategyEngine.from_dict(strategy_data)
+                    strategy_rejections = rejection_summary["strategy_rejections"]
 
-                    signal = strategy.evaluate(symbol, timeframe, candles, market)
+                    signal = strategy.evaluate(symbol, timeframe, candles, market, diagnostics=strategy_rejections)
                     if signal is None:
+                        rejection_summary["strategy_returned_none"] = int(rejection_summary["strategy_returned_none"]) + 1
                         continue
 
                     rr = abs(signal.take_profit - signal.entry) / max(abs(signal.entry - signal.stop_loss), 1e-9)
                     if rr < self.min_rr_floor:
+                        rejection_summary["rr_below_floor"] = int(rejection_summary["rr_below_floor"]) + 1
                         continue
 
                     closes = [c.close for c in candles]
@@ -624,6 +634,9 @@ class LiveAdaptivePaperTrader:
                     ema_slow_v = ema(closes, int(strategy_data["ema_slow"]))
                     trend_strength = abs(ema_fast_v - ema_slow_v) / max(signal.entry, 1e-9)
                     if trend_strength < self.min_trend_strength:
+                        rejection_summary["trend_strength_below_min"] = int(
+                            rejection_summary["trend_strength_below_min"]
+                        ) + 1
                         continue
 
                     cost_r = self.cost_model.trade_cost_r(signal.entry, signal.stop_loss)
@@ -639,6 +652,9 @@ class LiveAdaptivePaperTrader:
                         symbol_quality=symbol_quality,
                     )
                     if quality_block is not None:
+                        quality_counts = rejection_summary["quality_blocked"]
+                        if isinstance(quality_counts, defaultdict):
+                            quality_counts[quality_block] += 1
                         continue
                     base_score = (signal.confidence * 0.65) + (trend_strength * 100.0 * 0.25) + ((rr - cost_r) * 0.10)
                     score = base_score * symbol_quality * self._signal_score_multiplier(signal_type)
@@ -667,6 +683,28 @@ class LiveAdaptivePaperTrader:
                         }
                     )
                 )
+
+        quality_blocked = rejection_summary["quality_blocked"]
+        strategy_rejections = rejection_summary["strategy_rejections"]
+        print(
+            json.dumps(
+                {
+                    "type": "CANDIDATE_REJECTION_SUMMARY",
+                    "time": self._now_iso(),
+                    "window_symbols": klines_window,
+                    "counts": {
+                        "strategy_returned_none": int(rejection_summary["strategy_returned_none"]),
+                        "strategy_rejections": (
+                            dict(strategy_rejections) if isinstance(strategy_rejections, defaultdict) else {}
+                        ),
+                        "rr_below_floor": int(rejection_summary["rr_below_floor"]),
+                        "trend_strength_below_min": int(rejection_summary["trend_strength_below_min"]),
+                        "quality_blocked": dict(quality_blocked) if isinstance(quality_blocked, defaultdict) else {},
+                        "candidates_emitted": len(candidates),
+                    },
+                }
+            )
+        )
 
         candidates.sort(key=lambda c: c.score, reverse=True)
         return candidates

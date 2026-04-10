@@ -27,6 +27,10 @@ class StrategyParameters:
     crossover_min_trend_strength: float = 0.0
     crossover_long_rsi_min: float = 0.0
     crossover_short_rsi_max: float = 100.0
+    crossover_max_drift_atr: float = 0.5
+    pullback_min_trend_strength: float = 0.003
+    pullback_confirmation_slack_pct: float = 0.0
+    volume_ratio_min: float = 0.5
     ema_trend: int = 0  # 0 = disabled; set to e.g. 200 to only trade with macro trend
 
 
@@ -55,6 +59,10 @@ class StrategyEngine:
             crossover_min_trend_strength=float(payload.get("crossover_min_trend_strength", 0.0)),
             crossover_long_rsi_min=float(payload.get("crossover_long_rsi_min", payload["long_rsi_min"])),
             crossover_short_rsi_max=float(payload.get("crossover_short_rsi_max", payload["short_rsi_max"])),
+            crossover_max_drift_atr=float(payload.get("crossover_max_drift_atr", 0.5)),
+            pullback_min_trend_strength=float(payload.get("pullback_min_trend_strength", 0.003)),
+            pullback_confirmation_slack_pct=float(payload.get("pullback_confirmation_slack_pct", 0.0)),
+            volume_ratio_min=float(payload.get("volume_ratio_min", 0.5)),
             ema_trend=int(payload.get("ema_trend", 0)),
         )
         return cls(params)
@@ -65,9 +73,15 @@ class StrategyEngine:
         timeframe: str,
         candles: List[Candle],
         market: MarketContext,
+        diagnostics: Optional[Dict[str, int]] = None,
     ) -> Optional[Signal]:
+        def note(reason: str) -> None:
+            if diagnostics is not None:
+                diagnostics[reason] = int(diagnostics.get(reason, 0)) + 1
+
         needed = max(self.params.ema_slow, self.params.rsi_period + 1, self.params.atr_period + 1)
         if len(candles) < needed:
+            note("not_enough_candles")
             return None
 
         close_prices = [c.close for c in candles]
@@ -81,6 +95,7 @@ class StrategyEngine:
 
         atr_pct = atr_v / entry if entry else 0.0
         if atr_pct < self.params.min_atr_pct or atr_pct > self.params.max_atr_pct:
+            note("atr_out_of_range")
             return None
 
         # Crossover recency: require the EMA crossover happened within the
@@ -105,8 +120,12 @@ class StrategyEngine:
                            for j in range(len(recent_diffs) - 1))
         trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
         if trend_strength < self.params.crossover_min_trend_strength:
+            if bullish_cross or bearish_cross:
+                note("crossover_trend_too_weak")
             bullish_cross = False
             bearish_cross = False
+        elif not bullish_cross and not bearish_cross:
+            note("no_recent_crossover")
 
         # Momentum confirmation: find how many bars ago the crossover happened
         # and reject if price already moved >0.5 ATR from the crossover bar.
@@ -121,12 +140,14 @@ class StrategyEngine:
 
         if bullish_cross:
             bull_age, bull_drift = _crossover_age_and_drift(recent_diffs, True)
-            if bull_age >= 3 and bull_drift > 0.5:
+            if bull_age >= 3 and bull_drift > self.params.crossover_max_drift_atr:
+                note("crossover_drift_too_large")
                 bullish_cross = False
 
         if bearish_cross:
             bear_age, bear_drift = _crossover_age_and_drift(recent_diffs, False)
-            if bear_age >= 3 and bear_drift > 0.5:
+            if bear_age >= 3 and bear_drift > self.params.crossover_max_drift_atr:
+                note("crossover_drift_too_large")
                 bearish_cross = False
 
         # Macro trend filter: restrict direction to align with EMA(ema_trend).
@@ -161,6 +182,22 @@ class StrategyEngine:
             and abs(market.funding_rate) <= self.params.funding_abs_limit
         ):
             side = "SHORT"
+        else:
+            if bullish_cross or bearish_cross:
+                if abs(market.funding_rate) > self.params.funding_abs_limit:
+                    note("crossover_funding_blocked")
+                elif bullish_cross and not allow_long:
+                    note("crossover_macro_trend_blocked")
+                elif bearish_cross and not allow_short:
+                    note("crossover_macro_trend_blocked")
+                elif bullish_cross and not (self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max and rsi_v >= self.params.crossover_long_rsi_min):
+                    note("crossover_rsi_out_of_range")
+                elif bearish_cross and not (self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max and rsi_v <= self.params.crossover_short_rsi_max):
+                    note("crossover_rsi_out_of_range")
+                elif bullish_cross and entry < ema_fast_v:
+                    note("crossover_price_not_on_correct_side")
+                elif bearish_cross and entry > ema_fast_v:
+                    note("crossover_price_not_on_correct_side")
 
         # Trend continuation / pullback entry: when EMAs are clearly separated
         # (strong trend) and price pulls back to touch the fast EMA, enter in
@@ -171,7 +208,7 @@ class StrategyEngine:
         if not side and abs(market.funding_rate) <= self.params.funding_abs_limit:
             trend_strength = abs(ema_fast_v - ema_slow_v) / entry if entry else 0.0
             # Require established trend: EMA gap > 0.3%
-            if trend_strength > 0.003 and len(candles) >= 3:
+            if trend_strength > self.params.pullback_min_trend_strength and len(candles) >= 3:
                 prev_close = candles[-2].close if len(candles) >= 2 else entry
                 prev2_close = candles[-3].close if len(candles) >= 3 else prev_close
                 if allow_long and ema_fast_v > ema_slow_v:
@@ -179,19 +216,39 @@ class StrategyEngine:
                     touch_dist = abs(candles[-1].low - ema_fast_v) / atr_v if atr_v else 999
                     bounced = entry > ema_fast_v and prev_close <= ema_fast_v * 1.002
                     # 2-candle confirmation: previous candle must have come from below/near EMA
-                    confirmed = prev_close > prev2_close and entry > prev_close
+                    confirmed = (
+                        prev_close >= prev2_close * (1 - self.params.pullback_confirmation_slack_pct)
+                        and entry >= prev_close * (1 - self.params.pullback_confirmation_slack_pct)
+                    )
                     if (touch_dist < 1.0 or bounced) and confirmed and self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
                         side = "LONG"
                         signal_type = "PULLBACK"
+                    elif self.params.long_rsi_min <= rsi_v <= self.params.long_rsi_max:
+                        note("pullback_confirmation_failed")
+                    else:
+                        note("pullback_rsi_out_of_range")
                 elif allow_short and ema_fast_v < ema_slow_v:
                     # Bearish trend: price pulled back near fast EMA and rejected
                     touch_dist = abs(candles[-1].high - ema_fast_v) / atr_v if atr_v else 999
                     rejected = entry < ema_fast_v and prev_close >= ema_fast_v * 0.998
                     # 2-candle confirmation: previous candle must have come from above/near EMA
-                    confirmed = prev_close < prev2_close and entry < prev_close
+                    confirmed = (
+                        prev_close <= prev2_close * (1 + self.params.pullback_confirmation_slack_pct)
+                        and entry <= prev_close * (1 + self.params.pullback_confirmation_slack_pct)
+                    )
                     if (touch_dist < 1.0 or rejected) and confirmed and self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max:
                         side = "SHORT"
                         signal_type = "PULLBACK"
+                    elif self.params.short_rsi_min <= rsi_v <= self.params.short_rsi_max:
+                        note("pullback_confirmation_failed")
+                    else:
+                        note("pullback_rsi_out_of_range")
+                else:
+                    note("pullback_macro_trend_blocked")
+            else:
+                note("pullback_trend_too_weak")
+        elif not side:
+            note("pullback_funding_blocked")
 
         # Trend momentum entry: DISABLED — historical data shows 0% win rate.
         # Momentum entries chase price too late and get whipsawed.
@@ -215,7 +272,8 @@ class StrategyEngine:
         if len(candles) >= 20:
             recent_vols = [c.volume for c in candles[-20:]]
             avg_vol = sum(recent_vols) / len(recent_vols)
-            if avg_vol > 0 and last.volume < avg_vol * 0.5:
+            if avg_vol > 0 and last.volume < avg_vol * self.params.volume_ratio_min:
+                note("volume_too_low")
                 return None
 
         # Candle body confirmation: skip only strong reversal candles
@@ -224,8 +282,10 @@ class StrategyEngine:
         if candle_range > 0:
             body_ratio = abs(last.close - last.open) / candle_range
             if side == "LONG" and last.close < last.open and body_ratio > 0.6:
+                note("reversal_candle_blocked")
                 return None
             if side == "SHORT" and last.close > last.open and body_ratio > 0.6:
+                note("reversal_candle_blocked")
                 return None
 
         sl_distance = atr_v * self.params.atr_multiplier
@@ -275,8 +335,10 @@ class StrategyEngine:
         confidence = max(0.0, min(confidence, 0.99))
 
         if confidence < self.params.min_confidence:
+            note("confidence_below_min")
             return None
 
+        note("signal_generated")
         reason = (
             f"{side} {signal_type.lower()} | EMA({self.params.ema_fast}/{self.params.ema_slow})={ema_fast_v:.2f}/{ema_slow_v:.2f}, "
             f"RSI={rsi_v:.1f}, ATR%={atr_pct:.4f}, funding={market.funding_rate:.5f}"

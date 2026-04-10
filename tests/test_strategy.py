@@ -12,6 +12,9 @@ def _default_params(**overrides) -> StrategyParameters:
         funding_abs_limit=0.001, min_confidence=0.25,
         long_rsi_min=55, long_rsi_max=72,
         short_rsi_min=28, short_rsi_max=48,
+        crossover_max_drift_atr=0.5,
+        pullback_confirmation_slack_pct=0.0,
+        volume_ratio_min=0.5,
     )
     defaults.update(overrides)
     return StrategyParameters(**defaults)
@@ -100,6 +103,60 @@ class StrategyEngineTests(unittest.TestCase):
         engine = StrategyEngine(_default_params(min_confidence=0.25, crossover_long_rsi_min=90))
         sig = engine.evaluate("BTCUSDT", "5m", candles, _neutral_market())
         self.assertIsNone(sig)
+
+    def test_pullback_min_trend_strength_can_block_signal(self) -> None:
+        prices = [95 + i * 0.3 for i in range(60)]
+        candles = _make_candles(prices)
+        engine = StrategyEngine(_default_params(min_confidence=0.0, pullback_min_trend_strength=1.0))
+        sig = engine.evaluate("BTCUSDT", "5m", candles, _neutral_market())
+        self.assertIsNone(sig)
+
+    def test_from_dict_supports_generation_relaxation_fields(self) -> None:
+        engine = StrategyEngine.from_dict({
+            "ema_fast": 5,
+            "ema_slow": 10,
+            "rsi_period": 14,
+            "atr_period": 14,
+            "atr_multiplier": 1.5,
+            "risk_reward": 2.0,
+            "min_atr_pct": 0.001,
+            "max_atr_pct": 0.05,
+            "funding_abs_limit": 0.001,
+            "min_confidence": 0.25,
+            "long_rsi_min": 55,
+            "long_rsi_max": 72,
+            "short_rsi_min": 28,
+            "short_rsi_max": 48,
+            "crossover_max_drift_atr": 0.9,
+            "pullback_confirmation_slack_pct": 0.002,
+            "volume_ratio_min": 0.35,
+        })
+        self.assertEqual(engine.params.crossover_max_drift_atr, 0.9)
+        self.assertEqual(engine.params.pullback_confirmation_slack_pct, 0.002)
+        self.assertEqual(engine.params.volume_ratio_min, 0.35)
+
+    def test_diagnostics_report_confidence_below_min(self) -> None:
+        prices = [95 + i * 0.3 for i in range(60)]
+        candles = _make_candles(prices)
+        engine = StrategyEngine(
+            _default_params(
+                min_confidence=0.995,
+                min_atr_pct=0.0,
+                max_atr_pct=1.0,
+                long_rsi_min=0,
+                long_rsi_max=100,
+                short_rsi_min=0,
+                short_rsi_max=100,
+                crossover_long_rsi_min=0,
+                crossover_short_rsi_max=100,
+                crossover_min_trend_strength=0.0,
+                pullback_min_trend_strength=0.0,
+            )
+        )
+        diagnostics = {}
+        sig = engine.evaluate("BTCUSDT", "5m", candles, _neutral_market(), diagnostics=diagnostics)
+        self.assertIsNone(sig)
+        self.assertGreaterEqual(diagnostics.get("confidence_below_min", 0), 1)
 
     def test_atr_outside_range_blocks_signal(self) -> None:
         # Flat prices → ATR ~ 0 → below min_atr_pct

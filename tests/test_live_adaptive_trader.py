@@ -1,6 +1,7 @@
 import json
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from src.live_adaptive_trader import CandidateSignal, LiveAdaptivePaperTrader
@@ -169,6 +170,78 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
         self.assertEqual(trader.symbols, ["BTCUSDT"])
         filtered = next(event for event in printed if event["type"] == "SYMBOLS_FILTERED")
         self.assertEqual(filtered["removed"][0]["symbol"], "BADUSDT")
+
+    def test_signal_candidates_emit_rejection_summary(self) -> None:
+        cfg = _config()
+        cfg["live_loop"]["symbols"] = ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        trader = _trader(cfg)
+        trader._get_klines_window = lambda: ["BTCUSDT", "ETHUSDT", "SOLUSDT"]
+        trader._premium_cache = {
+            "BTCUSDT": MarketContext(mark_price=100.0, funding_rate=0.0, open_interest=100000.0),
+            "ETHUSDT": MarketContext(mark_price=100.0, funding_rate=0.0, open_interest=100000.0),
+            "SOLUSDT": MarketContext(mark_price=100.0, funding_rate=0.0, open_interest=100000.0),
+        }
+        candles = [
+            Candle(
+                open_time_ms=(idx + 1) * 60000,
+                open=100.0 + (idx * 0.1),
+                high=100.5 + (idx * 0.1),
+                low=99.5 + (idx * 0.1),
+                close=100.0 + (idx * 0.1),
+                volume=10.0,
+                close_time_ms=((idx + 1) * 60000) + 1,
+            )
+            for idx in range(80)
+        ]
+        trader.client.fetch_klines = lambda symbol, interval, limit: candles
+
+        signals = {
+            "BTCUSDT": None,
+            "ETHUSDT": Signal(
+                symbol="ETHUSDT",
+                timeframe="5m",
+                side="LONG",
+                entry=100.0,
+                take_profit=100.2,
+                stop_loss=99.0,
+                confidence=0.9,
+                reason="LONG crossover | test",
+                signal_time_ms=1,
+            ),
+            "SOLUSDT": Signal(
+                symbol="SOLUSDT",
+                timeframe="5m",
+                side="LONG",
+                entry=100.0,
+                take_profit=101.0,
+                stop_loss=99.0,
+                confidence=0.9,
+                reason="LONG crossover | test",
+                signal_time_ms=1,
+            ),
+        }
+
+        def fake_strategy_from_dict(_payload: dict) -> SimpleNamespace:
+            return SimpleNamespace(
+                evaluate=lambda symbol, timeframe, candles, market, diagnostics=None: signals[symbol]
+            )
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.StrategyEngine.from_dict", side_effect=fake_strategy_from_dict), patch(
+            "src.live_adaptive_trader.print", fake_print
+        ), patch.object(trader, "_candidate_quality_block_reason", return_value="weak_crossover_confidence"):
+            candidates = trader._signal_candidates()
+
+        self.assertEqual(candidates, [])
+        summary = next(event for event in printed if event["type"] == "CANDIDATE_REJECTION_SUMMARY")
+        self.assertEqual(summary["counts"]["strategy_returned_none"], 1)
+        self.assertEqual(summary["counts"]["rr_below_floor"], 1)
+        self.assertEqual(summary["counts"]["quality_blocked"]["weak_crossover_confidence"], 1)
+        self.assertEqual(summary["counts"]["candidates_emitted"], 0)
 
     def test_run_can_open_new_trade_while_previous_trade_remains_open(self) -> None:
         cfg = _config()
