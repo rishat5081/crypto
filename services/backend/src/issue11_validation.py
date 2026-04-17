@@ -19,6 +19,7 @@ class TradeRecord:
     opened_at_ms: Optional[int]
     closed_at_ms: Optional[int]
     signal_type: str
+    regime: str
     exit_type: str
     stop_state: str
     hold_minutes: Optional[float]
@@ -42,6 +43,10 @@ def _signal_type(reason: str, trade_meta: Dict[str, Any]) -> str:
     if explicit:
         return explicit
     upper = str(reason or "").upper()
+    if "BB_REVERSION" in upper:
+        return "BB_REVERSION"
+    if "SUPERTREND" in upper:
+        return "SUPERTREND"
     if "PULLBACK" in upper:
         return "PULLBACK"
     if "MOMENTUM" in upper:
@@ -49,6 +54,19 @@ def _signal_type(reason: str, trade_meta: Dict[str, Any]) -> str:
     if "CROSSOVER" in upper:
         return "CROSSOVER"
     return "UNKNOWN"
+
+
+def _regime(reason: str, trade_meta: Dict[str, Any]) -> str:
+    explicit = str(trade_meta.get("regime") or "").upper()
+    if explicit:
+        return explicit
+    upper = str(reason or "").upper()
+    marker = "REGIME="
+    if marker not in upper:
+        return "UNKNOWN"
+    tail = upper.split(marker, 1)[1]
+    token = tail.split("|", 1)[0].split(",", 1)[0].strip()
+    return token or "UNKNOWN"
 
 
 def _exit_type(reason: str, result: str, trade_meta: Dict[str, Any]) -> str:
@@ -130,6 +148,7 @@ def load_trade_records(history_file: Path) -> list[TradeRecord]:
                 opened_at_ms=int(trade["opened_at_ms"]) if trade.get("opened_at_ms") is not None else None,
                 closed_at_ms=int(trade["closed_at_ms"]) if trade.get("closed_at_ms") is not None else None,
                 signal_type=_signal_type(reason, trade_meta),
+                regime=_regime(reason, trade_meta),
                 exit_type=_exit_type(reason, result, trade_meta),
                 stop_state=str(trade_meta.get("stop_state") or "ORIGINAL").upper(),
                 hold_minutes=_hold_minutes(trade, trade_meta),
@@ -189,11 +208,13 @@ def summarize_records(rows: list[TradeRecord]) -> Dict[str, Any]:
         "adverse_cut_frequency": round(adverse_cut_count / total, 4) if total else 0.0,
         "avg_hold_minutes": round(sum(holds) / len(holds), 4) if holds else 0.0,
         "per_signal_type": _bucket_rows(rows, lambda row: row.signal_type),
+        "per_regime": _bucket_rows(rows, lambda row: row.regime),
         "per_exit_type": _bucket_rows(rows, lambda row: row.exit_type),
         "per_signal_exit_combo": _bucket_rows(rows, lambda row: f"{row.signal_type} x {row.exit_type}"),
         "per_symbol": _bucket_rows(rows, lambda row: row.symbol),
     }
     summary["worst_symbols"] = summary["per_symbol"][:5]
+    summary["worst_regimes"] = summary["per_regime"][:5]
     summary["worst_exit_types"] = summary["per_exit_type"][:5]
     summary["worst_signal_exit_combos"] = summary["per_signal_exit_combo"][:5]
     return summary

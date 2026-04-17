@@ -233,6 +233,22 @@ function formatPrice(value) {
   return num > 100 ? num.toFixed(2) : num.toFixed(6);
 }
 
+function formatStructureLevel(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  if (raw.toLowerCase() === "na") return "na";
+  const num = Number(raw);
+  return Number.isFinite(num) ? num.toFixed(2) : raw;
+}
+
+function normalizeTradeReason(reason) {
+  const raw = String(reason || "");
+  if (!raw) return "";
+  return raw.replace(/SR=([^/|,]+)\/([^,|]+)(?=,|\s*\||$)/, (_match, support, resistance) =>
+    `SR=${formatStructureLevel(support)}/${formatStructureLevel(resistance)}`
+  );
+}
+
 function rrFromTrade(trade) {
   if (!trade) return "-";
   if (Number.isFinite(Number(trade.rr))) return fmtNumber(trade.rr, 3);
@@ -698,6 +714,7 @@ function App() {
 function HomePage({ desk }) {
   const isDeskFresh = isFresh(desk.state?.last_update || desk.state?.generated_at);
   const openTrade = isTradeOpen(desk.state?.open_trade) ? desk.state.open_trade : null;
+  const orphanPositions = Array.isArray(desk.binance?.orphan_positions) ? desk.binance.orphan_positions : [];
   const possibleTrades = isDeskFresh && Array.isArray(desk.state?.possible_trades_live)
     ? desk.state.possible_trades_live.filter((trade) => isFresh(trade.last_seen_time || trade.updated_at || trade.time))
     : [];
@@ -750,6 +767,12 @@ function HomePage({ desk }) {
           {!isDeskFresh && (
             <div className="status-banner">
               Live feed is stale. The last market/trade update is older than 20 minutes, so stale opportunities are hidden.
+            </div>
+          )}
+          {orphanPositions.length > 0 && (
+            <div className="status-banner" style={{ background: "#7f1d1d", color: "#fecaca" }}>
+              Binance still has {orphanPositions.length} unmanaged open position{orphanPositions.length === 1 ? "" : "s"}.
+              Closed-trade history stays empty until those positions are closed or reattached to trader state.
             </div>
           )}
         </div>
@@ -838,6 +861,7 @@ function TradesPage({ desk }) {
   const rawOpenTrade = desk.state?.open_trade || null;
   const marketSnaps = desk.state?.market || [];
   const binancePositions = Array.isArray(desk.binance?.open_positions) ? desk.binance.open_positions : [];
+  const orphanPositions = Array.isArray(desk.binance?.orphan_positions) ? desk.binance.orphan_positions : [];
   const openTradeStatus = tradeStatus(rawOpenTrade);
   const matchingBinancePosition = rawOpenTrade
     ? binancePositions.find((position) => position.symbol === rawOpenTrade.symbol && position.side === rawOpenTrade.side)
@@ -862,6 +886,21 @@ function TradesPage({ desk }) {
     : [];
   const spotlightTrade = openTrade || possibleTrades[0] || null;
   const spotlightTime = spotlightTrade?.updated_at || spotlightTrade?.time || spotlightTrade?.last_seen_time || null;
+  const spotlightReason = normalizeTradeReason(spotlightTrade?.reason);
+  const spotlightBinanceStatus = (() => {
+    if (!spotlightTrade) return "-";
+    if (!openTrade) return "No";
+    if (binanceTradeConfirmed) return "Yes";
+    if (rawOpenTrade?.binance_executed) return "Pending";
+    return "No";
+  })();
+  const spotlightBinanceRuntimeLabel = (() => {
+    if (!spotlightTrade) return "Binance: -";
+    if (!openTrade) return "Binance: No (setup only)";
+    if (binanceTradeConfirmed) return "Binance: Yes";
+    if (rawOpenTrade?.binance_executed) return "Binance: Pending sync";
+    return "Binance: No";
+  })();
   const filteredTrades = useMemo(
     () =>
       possibleTrades.filter((trade) => {
@@ -879,6 +918,14 @@ function TradesPage({ desk }) {
           The live trader is not emitting fresh cycles right now. This page is hiding stale setups instead of showing old trades as live.
         </div>
       )}
+      {orphanPositions.length > 0 && (
+        <div className="status-banner" style={{ background: "#7f1d1d", color: "#fecaca" }}>
+          Binance has {orphanPositions.length} unmanaged open position{orphanPositions.length === 1 ? "" : "s"}:
+          {" "}
+          {orphanPositions.map((position) => `${position.symbol} ${position.side}`).join(", ")}.
+          {" "}These will not appear in closed history until they are closed or reattached.
+        </div>
+      )}
       <div className="two-column">
         <motion.article className="feature-panel spotlight-panel" whileHover={{ y: -4 }}>
           <div className="panel-topline">
@@ -888,6 +935,11 @@ function TradesPage({ desk }) {
           {rawOpenTrade && staleBinanceTrade && (
             <div className="status-banner" style={{ background: "#7f1d1d", color: "#fecaca" }}>
               Trader cache reported a Binance trade, but Binance has no live open position for {rawOpenTrade.symbol}. The spotlight is falling back to the next valid setup.
+            </div>
+          )}
+          {spotlightTrade && !openTrade && (
+            <div className="status-banner" style={{ background: "#1e293b", color: "#94a3b8" }}>
+              Setup only — not placed on Binance yet
             </div>
           )}
           {openTrade && (() => {
@@ -916,11 +968,12 @@ function TradesPage({ desk }) {
           <div className="spotlight-head">
             <div>
               <h3>{spotlightTrade?.symbol || "No setup live"}</h3>
-              <p>{spotlightTrade?.reason || "The desk is scanning for a qualified trade."}</p>
+              <p>{spotlightReason || "The desk is scanning for a qualified trade."}</p>
               <div className="trade-runtime">
                 <span>{`Timeframe ${spotlightTrade?.timeframe || "-"}`}</span>
                 <span>{spotlightTime ? `Signal: ${fmtTime(spotlightTime)}` : "—"}</span>
                 <span>{`${fmtElapsed(spotlightTime)} ago`}</span>
+                <span>{spotlightBinanceRuntimeLabel}</span>
               </div>
             </div>
             <div className={`tone-pill ${sideTone(spotlightTrade?.side)}`}>{spotlightTrade?.side || "Waiting"}</div>
@@ -932,6 +985,7 @@ function TradesPage({ desk }) {
             <Stat label="RR" value={rrFromTrade(spotlightTrade)} />
             <Stat label="Confidence" value={fmtPercent(spotlightTrade?.confidence)} />
             <Stat label="Score" value={fmtNumber(spotlightTrade?.score, 3)} />
+            <Stat label="Binance" value={spotlightBinanceStatus} />
             <Stat label="Expected Close" value={fmtExpectedClose(spotlightTime, spotlightTrade?.timeframe)} />
           </div>
         </motion.article>
@@ -952,7 +1006,7 @@ function TradesPage({ desk }) {
               <div className="trade-item" key={`${trade.symbol}-${trade.timeframe}-${trade.last_seen_time}`}>
                 <div>
                   <strong>{trade.symbol}</strong>
-                  <p>{trade.reason}</p>
+                  <p>{normalizeTradeReason(trade.reason)}</p>
                   <div className="trade-runtime compact">
                     <span>{`Timeframe ${trade.timeframe || "-"}`}</span>
                     <span>{trade.last_seen_time ? fmtTime(trade.last_seen_time) : "—"}</span>

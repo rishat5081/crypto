@@ -87,6 +87,7 @@ class BinanceExecutor:
 
         account_cfg = config.get("account", {})
         risk_per_trade_pct = float(account_cfg.get("risk_per_trade_pct", 0.02))
+        configured_balance = float(account_cfg.get("starting_balance_usd", 0.0) or 0.0)
 
         # Fetch real balance and size using configured wallet risk percentage.
         if executor.enabled:
@@ -94,8 +95,20 @@ class BinanceExecutor:
                 live_balance = executor.get_balance()
                 executor.risk_per_trade_usd = live_balance * risk_per_trade_pct
                 executor.max_position_usd = live_balance * 0.05
+                logger.info(
+                    "Live Binance sizing active: wallet_balance=%.2f USDT, configured_starting_balance=%.2f USDT, "
+                    "risk_per_trade=%.2f USDT, max_position=%.2f USDT, demo=%s",
+                    live_balance,
+                    configured_balance,
+                    executor.risk_per_trade_usd,
+                    executor.max_position_usd,
+                    executor.demo,
+                )
             except Exception:
-                pass
+                logger.warning(
+                    "Falling back to default Binance sizing values; unable to fetch live wallet balance.",
+                    exc_info=True,
+                )
 
         return executor
 
@@ -397,6 +410,12 @@ class BinanceExecutor:
                 "base_url": self.base_url,
                 "balance": balance,
                 "risk_per_trade": self.risk_per_trade_usd,
+                "max_position": self.max_position_usd,
+                "sizing": {
+                    "mode": "live_balance_pct",
+                    "risk_per_trade": self.risk_per_trade_usd,
+                    "max_position": self.max_position_usd,
+                },
                 "active_position": self._active_position,
             }
         except Exception as exc:

@@ -172,12 +172,16 @@ def main() -> None:
         "best_strategy": result.strategy,
         "applied_strategy_source": applied_strategy_source,
         "selection_reason": selection_reason,
+        "per_signal_type": result.per_signal_type,
+        "per_regime": result.per_regime,
         "baseline": {
             "selected_trades": baseline_result.total_selected_trades,
             "wins": baseline_result.wins,
             "losses": baseline_result.losses,
             "win_rate": round(baseline_result.win_rate, 4),
             "expectancy_r": round(baseline_result.expectancy_r, 4),
+            "per_signal_type": baseline_result.per_signal_type,
+            "per_regime": baseline_result.per_regime,
         },
         "folds": [
             {

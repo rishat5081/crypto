@@ -19,6 +19,8 @@ _LIVE_LOOP_KEYS = [
     "execute_min_confidence", "execute_min_expectancy_r", "execute_min_score",
 ]
 
+_VALID_REGIMES = {"TRENDING", "RANGING", "VOLATILE"}
+
 
 def validate_config(cfg: Dict[str, Any]) -> List[str]:
     errors: List[str] = []
@@ -64,6 +66,26 @@ def validate_config(cfg: Dict[str, Any]) -> List[str]:
         errors.append(
             f"live_loop.relax_min_execute_expectancy_r ({relax_exp}) "
             f"must be <= execute_min_expectancy_r ({exec_exp})"
+        )
+
+    timeframes = [str(v).strip() for v in ll.get("timeframes", []) if str(v).strip()]
+    execute_timeframes = [str(v).strip() for v in ll.get("execute_timeframes", timeframes) if str(v).strip()]
+    if execute_timeframes:
+        invalid_execute_timeframes = [tf for tf in execute_timeframes if tf not in timeframes]
+        if invalid_execute_timeframes:
+            errors.append(
+                "live_loop.execute_timeframes must be a subset of live_loop.timeframes "
+                f"(invalid: {invalid_execute_timeframes})"
+            )
+
+    allowed_execution_regimes = [
+        str(v).strip().upper() for v in ll.get("allowed_execution_regimes", []) if str(v).strip()
+    ]
+    invalid_regimes = [regime for regime in allowed_execution_regimes if regime not in _VALID_REGIMES]
+    if invalid_regimes:
+        errors.append(
+            "live_loop.allowed_execution_regimes contains invalid values "
+            f"(valid: {sorted(_VALID_REGIMES)}, invalid: {invalid_regimes})"
         )
 
     return errors
