@@ -77,6 +77,18 @@ class ConfigValidationTests(unittest.TestCase):
         errors = validate_config(cfg)
         self.assertTrue(any("daily_loss_limit_r" in e for e in errors))
 
+    def test_execute_timeframes_must_be_subset_of_timeframes(self) -> None:
+        cfg = _valid_config()
+        cfg["live_loop"]["execute_timeframes"] = ["15m"]
+        errors = validate_config(cfg)
+        self.assertTrue(any("execute_timeframes" in e for e in errors))
+
+    def test_invalid_execution_regime_detected(self) -> None:
+        cfg = _valid_config()
+        cfg["live_loop"]["allowed_execution_regimes"] = ["SIDEWAYS"]
+        errors = validate_config(cfg)
+        self.assertTrue(any("allowed_execution_regimes" in e for e in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

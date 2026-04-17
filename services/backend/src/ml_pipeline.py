@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 from .bulk_backtester import MarketDataset
@@ -21,6 +21,8 @@ class SignalSample:
     label: int
     pnl_r: float
     confidence: float
+    signal_type: str = "UNKNOWN"
+    regime: str = "UNKNOWN"
 
 
 @dataclass
@@ -46,6 +48,32 @@ class WalkForwardResult:
     folds: List[FoldResult]
     per_market: List[Dict]
     tested_thresholds: List[float]
+    per_signal_type: List[Dict] = field(default_factory=list)
+    per_regime: List[Dict] = field(default_factory=list)
+
+
+def _signal_type_from_reason(reason: str) -> str:
+    upper = str(reason or "").upper()
+    if "BB_REVERSION" in upper:
+        return "BB_REVERSION"
+    if "SUPERTREND" in upper:
+        return "SUPERTREND"
+    if "PULLBACK" in upper:
+        return "PULLBACK"
+    if "CROSSOVER" in upper:
+        return "CROSSOVER"
+    if "MOMENTUM" in upper:
+        return "MOMENTUM"
+    return "UNKNOWN"
+
+
+def _regime_from_reason(reason: str) -> str:
+    upper = str(reason or "").upper()
+    marker = "REGIME="
+    if marker not in upper:
+        return "UNKNOWN"
+    token = upper.split(marker, 1)[1].split("|", 1)[0].split(",", 1)[0].strip()
+    return token or "UNKNOWN"
 
 
 class StandardScaler:
@@ -332,6 +360,8 @@ class MLWalkForwardOptimizer:
                         label=1 if pnl_r > 0 else 0,
                         pnl_r=pnl_r,
                         confidence=signal.confidence,
+                        signal_type=_signal_type_from_reason(signal.reason),
+                        regime=_regime_from_reason(signal.reason),
                     )
                 )
 
@@ -368,6 +398,39 @@ class MLWalkForwardOptimizer:
         win_rate = wins / trades
         expectancy_r = sum(s.pnl_r for s in samples) / trades
         return wins, losses, win_rate, expectancy_r
+
+    @staticmethod
+    def _bucket_samples(samples: Sequence[SignalSample], key_getter) -> List[Dict]:
+        buckets: Dict[str, Dict[str, float]] = {}
+        for sample in samples:
+            key = str(key_getter(sample) or "UNKNOWN")
+            bucket = buckets.setdefault(
+                key,
+                {"label": key, "trades": 0, "wins": 0, "losses": 0, "pnl_r": 0.0},
+            )
+            bucket["trades"] += 1
+            if sample.label == 1:
+                bucket["wins"] += 1
+            else:
+                bucket["losses"] += 1
+            bucket["pnl_r"] += sample.pnl_r
+
+        output: List[Dict] = []
+        for key in sorted(buckets.keys()):
+            bucket = buckets[key]
+            trades = int(bucket["trades"])
+            output.append(
+                {
+                    "label": bucket["label"],
+                    "trades": trades,
+                    "wins": int(bucket["wins"]),
+                    "losses": int(bucket["losses"]),
+                    "win_rate": round(bucket["wins"] / trades, 4) if trades else 0.0,
+                    "expectancy_r": round(bucket["pnl_r"] / trades, 4) if trades else 0.0,
+                }
+            )
+        output.sort(key=lambda row: (row["expectancy_r"], row["label"]))
+        return output
 
     def walk_forward(
         self,
@@ -509,6 +572,8 @@ class MLWalkForwardOptimizer:
             folds=fold_results,
             per_market=per_market_list,
             tested_thresholds=threshold_grid,
+            per_signal_type=self._bucket_samples(selected_all, lambda sample: sample.signal_type),
+            per_regime=self._bucket_samples(selected_all, lambda sample: sample.regime),
         )
 
     def optimize(

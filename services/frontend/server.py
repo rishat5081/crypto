@@ -22,6 +22,9 @@ from xml.etree import ElementTree as ET
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+BACKEND_ROOT = PROJECT_ROOT / "backend"
+if str(BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(BACKEND_ROOT))
 
 try:
     from pymongo import ASCENDING, DESCENDING, MongoClient
@@ -1914,6 +1917,20 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                 balance = float(account.get("totalWalletBalance", 0))
                 available = float(account.get("availableBalance", 0))
                 unrealized = float(account.get("totalUnrealizedProfit", 0))
+                state = self.cache.refresh()
+                open_trade = state.get("open_trade") or {}
+                managed_keys = set()
+                if (
+                    isinstance(open_trade, dict)
+                    and open_trade.get("binance_executed")
+                    and str(open_trade.get("signal_state") or "ACTIVE").upper() == "ACTIVE"
+                ):
+                    managed_keys.add(
+                        (
+                            str(open_trade.get("symbol") or "").upper(),
+                            str(open_trade.get("side") or "").upper(),
+                        )
+                    )
                 positions = [
                     {
                         "symbol": p["symbol"],
@@ -1926,6 +1943,11 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     for p in account.get("positions", [])
                     if float(p.get("positionAmt", 0)) != 0
                 ]
+                orphan_positions = [
+                    position for position in positions
+                    if (position["symbol"], position["side"]) not in managed_keys
+                ]
+                sizing = executor.status().get("sizing", {}) if hasattr(executor, "status") else {}
                 self._write_json({
                     "enabled": True,
                     "demo": executor.demo,
@@ -1936,6 +1958,15 @@ class DashboardHandler(SimpleHTTPRequestHandler):
                     "initial_balance": 5000.0,
                     "total_pnl": round(balance + unrealized - 5000.0, 2),
                     "open_positions": positions,
+                    "orphan_positions": orphan_positions,
+                    "orphan_count": len(orphan_positions),
+                    "managed_position_count": len(managed_keys),
+                    "history_requires_close": True,
+                    "warning": (
+                        "Binance has open positions that are not attached to the trader state."
+                        if orphan_positions else None
+                    ),
+                    "sizing": sizing,
                     "time": datetime.now(timezone.utc).isoformat(),
                 })
             except Exception as exc:

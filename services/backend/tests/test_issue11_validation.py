@@ -23,7 +23,7 @@ class Issue11ValidationTests(unittest.TestCase):
                 "closed_at_ms": 2000,
                 "pnl_r": -0.6,
                 "pnl_usd": -0.12,
-                "reason": "ADVERSE_CUT | LONG crossover | test",
+                "reason": "ADVERSE_CUT | LONG crossover | regime=TRENDING | test",
             }
             events = [
                 {"type": "TRADE_RESULT", "time": "2026-04-09T10:00:00+00:00", "trade": trade},
@@ -35,6 +35,7 @@ class Issue11ValidationTests(unittest.TestCase):
 
             self.assertEqual(len(rows), 1)
             self.assertEqual(rows[0].trade_key, "BTCUSDT|5m|LONG|1000|2000")
+            self.assertEqual(rows[0].regime, "TRENDING")
 
     def test_summarize_records_returns_issue11_buckets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -56,7 +57,7 @@ class Issue11ValidationTests(unittest.TestCase):
                         "closed_at_ms": 601000,
                         "pnl_r": -0.6,
                         "pnl_usd": -0.12,
-                        "reason": "ADVERSE_CUT | LONG crossover | test",
+                        "reason": "ADVERSE_CUT | LONG crossover | regime=TRENDING | test",
                     },
                     "trade_meta": {"signal_type": "CROSSOVER", "exit_type": "ADVERSE_CUT", "stop_state": "ORIGINAL", "hold_minutes": 10.0},
                 },
@@ -76,7 +77,7 @@ class Issue11ValidationTests(unittest.TestCase):
                         "closed_at_ms": 3601000,
                         "pnl_r": 1.0,
                         "pnl_usd": 0.2,
-                        "reason": "TP_HIT | LONG pullback | test",
+                        "reason": "TP_HIT | LONG pullback | regime=RANGING | test",
                     },
                     "trade_meta": {"signal_type": "PULLBACK", "exit_type": "DIRECT_TP", "stop_state": "TRAILING", "hold_minutes": 60.0},
                 },
@@ -86,9 +87,41 @@ class Issue11ValidationTests(unittest.TestCase):
             summary = summarize_records(load_trade_records(history))
 
             self.assertEqual(summary["worst_symbols"][0]["label"], "BTCUSDT")
+            self.assertEqual(summary["worst_regimes"][0]["label"], "TRENDING")
             self.assertEqual(summary["worst_exit_types"][0]["label"], "ADVERSE_CUT")
             self.assertEqual(summary["worst_signal_exit_combos"][0]["label"], "CROSSOVER x ADVERSE_CUT")
             self.assertEqual(summary["adverse_cut_count"], 1)
+
+    def test_signal_type_parser_supports_new_strategy_labels(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            history = Path(tmp) / "history.jsonl"
+            events = [
+                {
+                    "type": "TRADE_RESULT",
+                    "time": "2026-04-09T10:00:00+00:00",
+                    "trade": {
+                        "symbol": "SOLUSDT",
+                        "timeframe": "5m",
+                        "side": "SHORT",
+                        "entry": 100.0,
+                        "take_profit": 98.0,
+                        "stop_loss": 101.0,
+                        "exit_price": 101.0,
+                        "result": "LOSS",
+                        "opened_at_ms": 1000,
+                        "closed_at_ms": 2000,
+                        "pnl_r": -1.0,
+                        "pnl_usd": -0.2,
+                        "reason": "DIRECT_SL | SHORT bb_reversion | regime=RANGING | test",
+                    },
+                }
+            ]
+            history.write_text("\n".join(json.dumps(event) for event in events) + "\n", encoding="utf-8")
+
+            rows = load_trade_records(history)
+
+            self.assertEqual(rows[0].signal_type, "BB_REVERSION")
+            self.assertEqual(rows[0].regime, "RANGING")
 
     def test_compare_summaries_returns_metric_deltas(self) -> None:
         delta = compare_summaries(

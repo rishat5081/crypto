@@ -1,6 +1,8 @@
 import json
+import tempfile
 import unittest
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -10,6 +12,20 @@ from src.models import Candle, ClosedTrade, MarketContext, Signal
 
 class _DisabledExecutor:
     enabled = False
+
+
+class _EnabledExecutor:
+    enabled = True
+
+    def __init__(self, account: dict | None = None, close_result: dict | None = None):
+        self._account = account or {"positions": []}
+        self._close_result = close_result or {"status": "closed", "executed": True}
+
+    def get_account(self) -> dict:
+        return self._account
+
+    def close_trade(self, symbol: str, side: str, reason: str = "") -> dict:
+        return dict(self._close_result)
 
 
 def _config() -> dict:
@@ -66,11 +82,13 @@ def _candidate(
     expectancy_r: float,
     score: float,
     reason: str = "LONG pullback | test",
+    side: str = "LONG",
+    timeframe: str = "5m",
 ) -> CandidateSignal:
     signal = Signal(
         symbol=symbol,
-        timeframe="5m",
-        side="LONG",
+        timeframe=timeframe,
+        side=side,
         entry=100.0,
         take_profit=101.0,
         stop_loss=99.0,
@@ -90,6 +108,49 @@ def _candidate(
 
 
 class LiveAdaptivePaperTraderTests(unittest.TestCase):
+    def test_orphan_close_events_are_persisted_to_runtime_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config_path = root / "config.json"
+            runtime_dir = root / "runtime"
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            cfg = _config()
+            cfg["live_loop"]["close_orphaned_positions_on_startup"] = True
+            cfg["live_loop"]["runtime_control_file"] = str(runtime_dir / "runtime_control.json")
+            cfg["_config_path"] = str(config_path)
+            config_path.write_text(json.dumps(cfg), encoding="utf-8")
+
+            executor = _EnabledExecutor(
+                account={
+                    "positions": [
+                        {
+                            "symbol": "DOTUSDT",
+                            "positionAmt": "190.5",
+                            "entryPrice": "1.31",
+                            "unrealizedProfit": "-4.85748901",
+                        }
+                    ]
+                },
+                close_result={
+                    "status": "closed",
+                    "executed": True,
+                    "entry_price": 1.31,
+                    "quantity": 190.5,
+                    "unrealized_pnl": -4.85748901,
+                },
+            )
+
+            with patch("src.live_adaptive_trader.BinanceExecutor.from_env", return_value=executor):
+                _ = LiveAdaptivePaperTrader(cfg)
+
+            events_file = runtime_dir / "live_events.jsonl"
+            self.assertTrue(events_file.exists())
+            rows = [json.loads(line) for line in events_file.read_text(encoding="utf-8").splitlines() if line.strip()]
+            self.assertEqual(rows[0]["action"], "ORPHAN_DETECTED")
+            self.assertEqual(rows[1]["action"], "ORPHAN_CLOSE")
+            self.assertEqual(rows[1]["symbol"], "DOTUSDT")
+            self.assertEqual(rows[1]["pnl"], -4.85748901)
+
     def test_paper_risk_override_is_used(self) -> None:
         cfg = _config()
         cfg["account"]["paper_risk_usd"] = 5.0
@@ -133,8 +194,8 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
         summary = result["summary"]
         self.assertEqual(summary["filter_rejections"]["candidate_confidence"], 1)
         self.assertEqual(summary["filter_rejections"]["candidate_expectancy"], 1)
-        self.assertEqual(summary["filter_rejections"]["execute_confidence"], 1)
-        self.assertEqual(summary["filter_rejections"]["execute_expectancy"], 1)
+        self.assertNotIn("execute_confidence", summary["filter_rejections"])
+        self.assertNotIn("execute_expectancy", summary["filter_rejections"])
         self.assertEqual(summary["filter_rejections"]["execute_score"], 1)
         self.assertEqual(summary["filter_rejections"]["execute_win_probability"], 1)
         self.assertEqual(summary["filter_rejections"]["execute_dual_timeframe_confirm"], 1)
@@ -145,11 +206,60 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
 
         no_signal = next(event for event in printed if event["type"] == "NO_SIGNAL")
         self.assertEqual(no_signal["reason"], "EXECUTION_FILTER_BLOCK")
-        self.assertEqual(no_signal["execution_rejections"]["execute_confidence"], 1)
-        self.assertEqual(no_signal["execution_rejections"]["execute_expectancy"], 1)
         self.assertEqual(no_signal["execution_rejections"]["execute_score"], 1)
         self.assertEqual(no_signal["execution_rejections"]["execute_win_probability"], 1)
         self.assertEqual(no_signal["execution_rejections"]["execute_dual_timeframe_confirm"], 1)
+
+    def test_underperforming_setup_side_is_paused_by_policy(self) -> None:
+        trader = _trader(_config())
+        for idx in range(3):
+            trader.policy_engine.record_trade(
+                signal_type="PULLBACK",
+                side="SHORT",
+                trade=ClosedTrade(
+                    symbol=f"LOSS{idx}USDT",
+                    timeframe="5m",
+                    side="SHORT",
+                    entry=100.0,
+                    take_profit=99.0,
+                    stop_loss=101.0,
+                    exit_price=101.0,
+                    result="LOSS",
+                    opened_at_ms=1,
+                    closed_at_ms=2 + idx,
+                    pnl_r=-1.0,
+                    pnl_usd=-0.2,
+                    reason="SHORT pullback | test",
+                ),
+            )
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.time.sleep", lambda *_: None), patch(
+            "src.live_adaptive_trader.print", fake_print
+        ):
+            trader._refresh_batch_market_data = lambda: None
+            trader._signal_candidates = lambda: [
+                _candidate(
+                    "BTCUSDT",
+                    confidence=0.9,
+                    expectancy_r=0.5,
+                    score=0.9,
+                    reason="SHORT pullback | test",
+                    side="SHORT",
+                )
+            ]
+            trader._estimate_win_probability = lambda candidate: 0.9
+            result = trader.run()
+
+        self.assertEqual(result["status"], "MAX_CYCLES_REACHED")
+        no_signal = next(event for event in printed if event["type"] == "NO_SIGNAL")
+        self.assertEqual(no_signal["reason"], "EXECUTION_FILTER_BLOCK")
+        self.assertEqual(no_signal["execution_rejections"]["policy_setup_side_paused"], 1)
+        self.assertGreater(result["summary"]["setup_side_health"]["PULLBACK|SHORT"]["cooldown_cycles_left"], 0)
 
     def test_invalid_symbols_are_filtered_from_watchlist(self) -> None:
         cfg = _config()
@@ -243,6 +353,59 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
         self.assertEqual(summary["counts"]["quality_blocked"]["weak_crossover_confidence"], 1)
         self.assertEqual(summary["counts"]["candidates_emitted"], 0)
 
+    def test_signal_candidates_drop_unfinished_last_candle(self) -> None:
+        cfg = _config()
+        cfg["live_loop"]["symbols"] = ["BTCUSDT"]
+        trader = _trader(cfg)
+        trader._get_klines_window = lambda: ["BTCUSDT"]
+        trader._premium_cache = {
+            "BTCUSDT": MarketContext(mark_price=100.0, funding_rate=0.0, open_interest=100000.0),
+        }
+
+        now_ms = 1_000_000
+        candles = [
+            Candle(
+                open_time_ms=idx * 60000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.0 + (idx * 0.01),
+                volume=10.0,
+                close_time_ms=(idx + 1) * 1000,
+            )
+            for idx in range(79)
+        ]
+        candles.append(
+            Candle(
+                open_time_ms=79 * 60000,
+                open=100.0,
+                high=101.0,
+                low=99.0,
+                close=100.79,
+                volume=10.0,
+                close_time_ms=now_ms + 60000,
+            )
+        )
+        trader.client.fetch_klines = lambda symbol, interval, limit: candles
+
+        seen: dict[str, int] = {}
+
+        def fake_strategy_from_dict(_payload: dict) -> SimpleNamespace:
+            def evaluate(symbol, timeframe, passed_candles, market, diagnostics=None):
+                seen["count"] = len(passed_candles)
+                seen["last_close_time_ms"] = passed_candles[-1].close_time_ms
+                return None
+
+            return SimpleNamespace(evaluate=evaluate)
+
+        with patch("src.live_adaptive_trader.StrategyEngine.from_dict", side_effect=fake_strategy_from_dict), patch(
+            "src.live_adaptive_trader.time.time", return_value=now_ms / 1000.0
+        ), patch("src.live_adaptive_trader.print", lambda *_: None):
+            trader._signal_candidates()
+
+        self.assertEqual(seen["count"], 79)
+        self.assertLess(seen["last_close_time_ms"], now_ms)
+
     def test_run_can_open_new_trade_while_previous_trade_remains_open(self) -> None:
         cfg = _config()
         cfg["live_loop"]["max_cycles"] = 2
@@ -268,10 +431,15 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
             result = trader.run()
 
         self.assertEqual(result["status"], "MAX_CYCLES_REACHED")
-        self.assertEqual(result["summary"]["open_trades_count"], 2)
+        # Graceful shutdown closes all open trades before exit
+        self.assertEqual(result["summary"]["open_trades_count"], 0)
         open_events = [event for event in printed if event["type"] == "OPEN_TRADE"]
         self.assertEqual(len(open_events), 2)
         self.assertEqual([event["symbol"] for event in open_events], ["BTCUSDT", "ETHUSDT"])
+        # Verify graceful shutdown event was emitted
+        shutdown_events = [event for event in printed if event["type"] == "GRACEFUL_SHUTDOWN"]
+        self.assertEqual(len(shutdown_events), 1)
+        self.assertEqual(shutdown_events[0]["open_trades_count"], 2)
 
     def test_short_break_even_price_moves_below_entry(self) -> None:
         trader = _trader(_config())
@@ -292,7 +460,7 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
             take_profit=101.0,
             stop_loss=99.0,
             confidence=0.8,
-            reason="LONG pullback | test",
+            reason="LONG pullback | regime=TRENDING | test",
             signal_time_ms=1,
         )
         managed = trader._make_managed_trade(signal, binance_opened=False)
@@ -322,8 +490,153 @@ class LiveAdaptivePaperTraderTests(unittest.TestCase):
         event = next(item for item in printed if item["type"] == "TRADE_RESULT")
         self.assertEqual(event["type"], "TRADE_RESULT")
         self.assertEqual(event["trade_meta"]["signal_type"], "PULLBACK")
+        self.assertEqual(event["trade_meta"]["regime"], "TRENDING")
         self.assertEqual(event["trade_meta"]["exit_type"], "ADVERSE_CUT")
         self.assertEqual(event["trade_meta"]["stop_state"], "BREAKEVEN")
+
+    def test_signal_regime_from_reason_parses_regime(self) -> None:
+        regime = LiveAdaptivePaperTrader._signal_regime_from_reason(
+            "LONG pullback | regime=TRENDING | EMA(8/34)=1/2"
+        )
+        self.assertEqual(regime, "TRENDING")
+
+    def test_execution_filter_blocks_non_execution_timeframe(self) -> None:
+        cfg = _config()
+        cfg["live_loop"]["timeframes"] = ["5m", "15m"]
+        cfg["live_loop"]["execute_timeframes"] = ["15m"]
+        trader = _trader(cfg)
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.time.sleep", lambda *_: None), patch(
+            "src.live_adaptive_trader.print", fake_print
+        ):
+            trader._refresh_batch_market_data = lambda: None
+            trader._signal_candidates = lambda: [
+                _candidate(
+                    "BTCUSDT",
+                    confidence=0.9,
+                    expectancy_r=0.5,
+                    score=0.9,
+                    reason="LONG pullback | regime=TRENDING | test",
+                    timeframe="5m",
+                )
+            ]
+            trader._estimate_win_probability = lambda candidate: 0.9
+            result = trader.run()
+
+        self.assertEqual(result["status"], "MAX_CYCLES_REACHED")
+        no_signal = next(event for event in printed if event["type"] == "NO_SIGNAL")
+        self.assertEqual(no_signal["reason"], "EXECUTION_FILTER_BLOCK")
+        self.assertEqual(no_signal["execution_rejections"]["execute_timeframe_not_allowed"], 1)
+
+    def test_execution_filter_blocks_disallowed_regime(self) -> None:
+        cfg = _config()
+        cfg["live_loop"]["allowed_execution_regimes"] = ["TRENDING"]
+        trader = _trader(cfg)
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.time.sleep", lambda *_: None), patch(
+            "src.live_adaptive_trader.print", fake_print
+        ):
+            trader._refresh_batch_market_data = lambda: None
+            trader._signal_candidates = lambda: [
+                _candidate(
+                    "BTCUSDT",
+                    confidence=0.9,
+                    expectancy_r=0.5,
+                    score=0.9,
+                    reason="LONG pullback | regime=RANGING | test",
+                )
+            ]
+            trader._estimate_win_probability = lambda candidate: 0.9
+            result = trader.run()
+
+        self.assertEqual(result["status"], "MAX_CYCLES_REACHED")
+        no_signal = next(event for event in printed if event["type"] == "NO_SIGNAL")
+        self.assertEqual(no_signal["execution_rejections"]["execute_regime_not_allowed"], 1)
+
+    def test_5m_can_confirm_but_only_15m_executes(self) -> None:
+        cfg = _config()
+        cfg["live_loop"]["timeframes"] = ["5m", "15m"]
+        cfg["live_loop"]["execute_timeframes"] = ["15m"]
+        cfg["live_loop"]["require_dual_timeframe_confirm"] = True
+        trader = _trader(cfg)
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.time.sleep", lambda *_: None), patch(
+            "src.live_adaptive_trader.print", fake_print
+        ):
+            trader._refresh_batch_market_data = lambda: None
+            trader._signal_candidates = lambda: [
+                _candidate(
+                    "BTCUSDT",
+                    confidence=0.9,
+                    expectancy_r=0.5,
+                    score=0.85,
+                    reason="LONG pullback | regime=TRENDING | test",
+                    timeframe="5m",
+                ),
+                _candidate(
+                    "BTCUSDT",
+                    confidence=0.92,
+                    expectancy_r=0.6,
+                    score=0.9,
+                    reason="LONG pullback | regime=TRENDING | test",
+                    timeframe="15m",
+                ),
+            ]
+            trader._estimate_win_probability = lambda candidate: 0.9
+            result = trader.run()
+
+        self.assertEqual(result["status"], "MAX_CYCLES_REACHED")
+        open_event = next(event for event in printed if event["type"] == "OPEN_TRADE")
+        self.assertEqual(open_event["timeframe"], "15m")
+
+    def test_1h_short_can_execute_when_enabled(self) -> None:
+        cfg = _config()
+        cfg["live_loop"]["timeframes"] = ["15m", "1h"]
+        cfg["live_loop"]["execute_timeframes"] = ["15m", "1h"]
+        trader = _trader(cfg)
+
+        printed = []
+
+        def fake_print(line: str) -> None:
+            printed.append(json.loads(line))
+
+        with patch("src.live_adaptive_trader.time.sleep", lambda *_: None), patch(
+            "src.live_adaptive_trader.print", fake_print
+        ):
+            trader._refresh_batch_market_data = lambda: None
+            trader._signal_candidates = lambda: [
+                _candidate(
+                    "ETHUSDT",
+                    confidence=0.9,
+                    expectancy_r=0.6,
+                    score=0.92,
+                    reason="SHORT pullback | regime=TRENDING | test",
+                    side="SHORT",
+                    timeframe="1h",
+                )
+            ]
+            trader._estimate_win_probability = lambda candidate: 0.9
+            result = trader.run()
+
+        self.assertEqual(result["status"], "MAX_CYCLES_REACHED")
+        open_event = next(event for event in printed if event["type"] == "OPEN_TRADE")
+        self.assertEqual(open_event["timeframe"], "1h")
+        self.assertEqual(open_event["side"], "SHORT")
 
     def test_candidate_quality_block_reason_rejects_weak_crossover(self) -> None:
         trader = _trader(_config())
