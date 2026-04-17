@@ -6,12 +6,9 @@ from src.indicators import (
     bb_width,
     bollinger_bands,
     ema,
-    multi_tf_trend,
     rsi,
     supertrend,
     supertrend_series,
-    support_resistance_zones,
-    volume_profile,
 )
 from src.models import Candle
 
@@ -28,8 +25,8 @@ def _trending_up_candles(n: int = 50, start: float = 100.0, step: float = 0.5) -
         o = price
         c = price + step
         h = c + step * 0.3
-        l = o - step * 0.2
-        candles.append(_candle(o, h, l, c, ts=i * 60000))
+        low = o - step * 0.2
+        candles.append(_candle(o, h, low, c, ts=i * 60000))
         price = c
     return candles
 
@@ -44,8 +41,8 @@ def _ranging_candles(n: int = 50, center: float = 100.0, amplitude: float = 1.0)
         o = v - 0.2
         c = v + 0.2
         h = max(o, c) + 0.1
-        l = min(o, c) - 0.1
-        candles.append(_candle(o, h, l, c, ts=i * 60000))
+        low = min(o, c) - 0.1
+        candles.append(_candle(o, h, low, c, ts=i * 60000))
     return candles
 
 

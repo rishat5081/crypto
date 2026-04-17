@@ -226,9 +226,9 @@ def _trending_up_candles(n: int = 50, start: float = 100.0, step: float = 0.5):
         o = price
         c = price + step
         h = c + step * 0.3
-        l = o - step * 0.2
+        low = o - step * 0.2
         candles.append(Candle(
-            open_time_ms=i * 60000, open=o, high=h, low=l,
+            open_time_ms=i * 60000, open=o, high=h, low=low,
             close=c, volume=100.0, close_time_ms=(i + 1) * 60000 - 1,
         ))
         price = c
@@ -243,9 +243,9 @@ def _ranging_candles(n: int = 50, center: float = 100.0, amplitude: float = 1.0)
         o = v - 0.2
         c = v + 0.2
         h = max(o, c) + 0.1
-        l = min(o, c) - 0.1
+        low = min(o, c) - 0.1
         candles.append(Candle(
-            open_time_ms=i * 60000, open=o, high=h, low=l,
+            open_time_ms=i * 60000, open=o, high=h, low=low,
             close=c, volume=100.0, close_time_ms=(i + 1) * 60000 - 1,
         ))
     return candles

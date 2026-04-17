@@ -201,7 +201,6 @@ def supertrend_series(candles: List[Candle], period: int = 10, multiplier: float
     result: List[tuple] = []
     prev_upper = 0.0
     prev_lower = 0.0
-    prev_st = 0.0
     prev_dir = "UP"
 
     for j in range(len(atr_series)):
@@ -241,7 +240,6 @@ def supertrend_series(candles: List[Candle], period: int = 10, multiplier: float
         result.append((st_val, direction))
         prev_upper = upper
         prev_lower = lower
-        prev_st = st_val
         prev_dir = direction
 
     return result
