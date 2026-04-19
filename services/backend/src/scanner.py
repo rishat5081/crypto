@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 from typing import Dict, Tuple
 
 from .alerts import play_trade_alert
-from .binance_futures_rest import BinanceFuturesRestClient
-from .strategy import StrategyEngine
+from .binance import BinanceFuturesRestClient
+from .strategies import StrategyService
 from .trade_engine import TradeEngine
 
 
@@ -20,7 +20,7 @@ class MarketScanner:
             force_mock=bool(ds.get("force_mock", False)),
             mock_seed=int(ds.get("mock_seed", 42)),
         )
-        self.strategy = StrategyEngine.from_dict(config["strategy"])
+        self.strategy = StrategyService.from_config(config["strategy"])
         account_cfg = config["account"]
         starting_balance = float(account_cfg["starting_balance_usd"])
         risk_per_trade_pct = float(account_cfg["risk_per_trade_pct"])

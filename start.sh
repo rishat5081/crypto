@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
-#  start.sh  —  One-command launcher for the full crypto signal system
+#  start.sh  —  One-command launcher for the live crypto trading system
 #  Usage:  ./start.sh
 #          ./start.sh --no-browser        (skip auto-open dashboard)
-#          ./start.sh --skip-optimize     (faster startup, no ML step)
 #          ./start.sh --no-frontend       (headless, trader only)
 #          ./start.sh --restart           (alias: same behavior — always kills stale)
+#          ./start.sh --skip-optimize     (accepted for backward compatibility; no-op)
 # ─────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -14,7 +14,6 @@ BACKEND_DIR="$ROOT_DIR/services/backend"
 
 # ── Defaults ─────────────────────────────────────────────────────────
 OPEN_BROWSER=1
-SKIP_OPTIMIZE=0
 START_FRONTEND=1
 
 FRONTEND_HOST="${FRONTEND_HOST:-127.0.0.1}"
@@ -23,18 +22,12 @@ MONGO_URI="${MONGO_URI:-mongodb://127.0.0.1:27017}"
 MONGO_DB="${MONGO_DB:-crypto_trading_live}"
 MONGO_REQUIRED="${MONGO_REQUIRED:-0}"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
-OPTIMIZE_MAX_CANDIDATES="${OPTIMIZE_MAX_CANDIDATES:-6}"
-OPTIMIZE_TIMEOUT_SEC="${OPTIMIZE_TIMEOUT_SEC:-45}"
-HEARTBEAT_SEC="${HEARTBEAT_SEC:-5}"
-RETUNE_FROM_EVENTS="${RETUNE_FROM_EVENTS:-0}"
-RETUNE_LOOKBACK_TRADES="${RETUNE_LOOKBACK_TRADES:-300}"
-RETUNE_MIN_TRADES="${RETUNE_MIN_TRADES:-20}"
 
 # ── Parse args ───────────────────────────────────────────────────────
 for arg in "$@"; do
   case "$arg" in
     --no-browser)      OPEN_BROWSER=0 ;;
-    --skip-optimize)   SKIP_OPTIMIZE=1 ;;
+    --skip-optimize)   ;; # deprecated no-op
     --no-frontend)     START_FRONTEND=0 ;;
     --restart)         ;; # always kills stale, this is a no-op alias
   esac
@@ -104,7 +97,6 @@ kill_pattern() {
 }
 
 kill_pattern "$BACKEND_DIR/run_live_adaptive.py" "live trader"
-kill_pattern "$BACKEND_DIR/run_ml_walkforward.py" "optimizer"
 kill_pattern "$FRONTEND_DIR/server.py"         "frontend server"
 
 if have_cmd lsof; then
@@ -233,99 +225,10 @@ sep
 log "Skipping bulk cache fetch (trader fetches live data per cycle)"
 ok "Cache step skipped"
 
-# ── ML walk-forward optimization ─────────────────────────────────────
+# ── Deprecated optimization/retune steps ─────────────────────────────
 sep
-if [ "$SKIP_OPTIMIZE" = "1" ]; then
-  log "Skipping ML optimization (--skip-optimize)"
-  emit_event "SKIP_OPTIMIZATION" "Skipped"
-else
-  log "Running ML walk-forward optimization (max ${OPTIMIZE_TIMEOUT_SEC}s)..."
-  emit_event "OPTIMIZING" "Running ML walk-forward optimization"
-
-  OPT_LOG="/tmp/crypto_optimizer.log"
-  : > "$OPT_LOG"
-
-  set +e
-  OPT_TIMED_OUT=0
-  python "$BACKEND_DIR/run_ml_walkforward.py" \
-    --config "$BACKEND_DIR/config.json" \
-    --cache-dir "$CACHE_DIR" \
-    --timeframes 5m,15m \
-    --target-trades 100 \
-    --target-wins 60 \
-    --max-candidates "$OPTIMIZE_MAX_CANDIDATES" \
-    --max-candles 500 \
-    --apply-best \
-    > "$OPT_LOG" 2>&1 &
-  OPT_PID=$!
-
-  START_TS=$(date +%s)
-  while kill -0 "$OPT_PID" 2>/dev/null; do
-    ELAPSED=$(( $(date +%s) - START_TS ))
-    log "  Optimizing... ${ELAPSED}s"
-    emit_event "OPTIMIZING" "In progress (${ELAPSED}s)"
-    if [ "$ELAPSED" -ge "$OPTIMIZE_TIMEOUT_SEC" ]; then
-      OPT_TIMED_OUT=1
-      kill "$OPT_PID" 2>/dev/null || true
-      sleep 1
-      kill -0 "$OPT_PID" 2>/dev/null && kill -9 "$OPT_PID" 2>/dev/null || true
-      wait "$OPT_PID" 2>/dev/null || true
-      warn "Optimization timed out after ${OPTIMIZE_TIMEOUT_SEC}s"
-      emit_event "OPTIMIZATION_TIMEOUT" "Timed out after ${OPTIMIZE_TIMEOUT_SEC}s"
-      break
-    fi
-    sleep "$HEARTBEAT_SEC"
-  done
-  wait "$OPT_PID" 2>/dev/null
-  OPT_STATUS=$?
-  set -e
-
-  if [ -s "$OPT_LOG" ]; then
-    cat "$OPT_LOG" >> "$EVENTS_FILE" 2>/dev/null || true
-  fi
-  if [ "${OPT_TIMED_OUT:-0}" -eq 1 ]; then
-    warn "Optimization step timed out, continuing without updated walk-forward parameters"
-  elif [ "${OPT_STATUS:-0}" -eq 0 ]; then
-    ok "Optimization step done"
-    emit_event "OPTIMIZATION_DONE" "Complete"
-  else
-    warn "Optimization failed (exit $OPT_STATUS), continuing with current strategy parameters"
-    emit_event "OPTIMIZATION_FAILED" "Exit $OPT_STATUS, continuing"
-  fi
-fi
-
-# ── Threshold retune from history ────────────────────────────────────
-sep
-if [ "$RETUNE_FROM_EVENTS" = "1" ]; then
-  log "Retuning thresholds from trade history..."
-  emit_event "RETUNING_THRESHOLDS" "Retuning from live history"
-
-  RETUNE_LOG="/tmp/crypto_retune.log"
-  : > "$RETUNE_LOG"
-  set +e
-  python "$BACKEND_DIR/run_retune_thresholds.py" \
-    --config "$BACKEND_DIR/config.json" \
-    --events-file "$EVENTS_FILE" \
-    --lookback-trades "$RETUNE_LOOKBACK_TRADES" \
-    --min-trades "$RETUNE_MIN_TRADES" \
-    --apply > "$RETUNE_LOG" 2>&1
-  RETUNE_STATUS=$?
-  set -e
-
-  if [ -s "$RETUNE_LOG" ]; then
-    cat "$RETUNE_LOG" >> "$EVENTS_FILE" 2>/dev/null || true
-  fi
-
-  if [ "$RETUNE_STATUS" -eq 0 ]; then
-    ok "Threshold retune done"
-    emit_event "RETUNE_DONE" "Complete"
-  else
-    warn "Retune failed (exit $RETUNE_STATUS), continuing with current config"
-    emit_event "RETUNE_FAILED" "Failed, continuing"
-  fi
-else
-  log "Skipping threshold retune"
-fi
+log "Skipping deprecated optimization and retune steps"
+emit_event "SKIP_OPTIMIZATION" "Deprecated pipeline removed"
 
 # ── Ready banner ─────────────────────────────────────────────────────
 sep

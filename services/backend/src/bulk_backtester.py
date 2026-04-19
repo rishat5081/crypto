@@ -5,9 +5,9 @@ import itertools
 from dataclasses import dataclass
 from typing import Dict, Iterable, List, Tuple
 
-from .binance_futures_rest import BinanceFuturesRestClient
+from .binance import BinanceFuturesRestClient
 from .models import Candle, ClosedTrade, MarketContext
-from .strategy import StrategyEngine
+from .strategies import StrategyService
 from .trade_engine import TradeEngine
 
 
@@ -74,7 +74,7 @@ class BulkBacktester:
         per_market: List[Dict] = []
 
         for dataset in datasets:
-            strategy = StrategyEngine.from_dict(copy.deepcopy(strategy_payload))
+            strategy = StrategyService.from_config(copy.deepcopy(strategy_payload))
             engine = TradeEngine(risk_usd=self.risk_usd)
 
             warmup = max(

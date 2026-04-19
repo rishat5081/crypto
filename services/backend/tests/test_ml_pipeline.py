@@ -1,6 +1,6 @@
 import unittest
 
-from src.ml_pipeline import LogisticBinaryClassifier, MLWalkForwardOptimizer, StandardScaler
+from src.ml import LogisticBinaryClassifier, MLWalkForwardOptimizer, StandardScaler
 
 
 class MLPipelineTests(unittest.TestCase):

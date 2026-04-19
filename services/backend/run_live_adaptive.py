@@ -6,7 +6,7 @@ import time
 from pathlib import Path
 
 from src.config import load_config
-from src.live_adaptive_trader import LiveAdaptivePaperTrader
+from src.live_trader import LiveAdaptivePaperTrader
 
 
 def main() -> None:

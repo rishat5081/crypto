@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch
 
-from src.binance_executor import BinanceExecutor
+from src.binance import BinanceExecutor
 
 
 class BinanceExecutorTests(unittest.TestCase):
@@ -13,7 +13,7 @@ class BinanceExecutorTests(unittest.TestCase):
             }
         }
 
-        with patch("src.binance_executor.os.getenv") as getenv, patch.object(
+        with patch("src.binance.executor.os.getenv") as getenv, patch.object(
             BinanceExecutor, "_load_exchange_info", lambda self: None
         ), patch.object(BinanceExecutor, "get_balance", lambda self: 250.0):
             getenv.side_effect = lambda key, default="": {

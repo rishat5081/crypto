@@ -27,8 +27,6 @@
 │   │   ├── pyproject.toml
 │   │   ├── start.sh
 │   │   ├── run_live_adaptive.py
-│   │   ├── run_ml_walkforward.py
-│   │   ├── run_retune_thresholds.py
 │   │   ├── src/
 │   │   └── tests/
 │   └── frontend/
@@ -53,11 +51,11 @@
 ```text
 Binance Futures API
     ↓
-services/backend/src/binance_futures_rest.py
+services/backend/src/binance/futures_rest.py
     ↓
-services/backend/src/strategy.py
+services/backend/src/strategies/structure/engine.py
     ↓
-services/backend/src/live_adaptive_trader.py
+services/backend/src/live_trader/core.py
     ↓
 /tmp/crypto-runtime/live_events.jsonl
     ↓
@@ -68,15 +66,14 @@ services/frontend/index.html + services/frontend/src/*
 
 ## Core Backend Modules
 
-- `services/backend/src/models.py`
+- `services/backend/src/models/`
 - `services/backend/src/indicators.py`
-- `services/backend/src/strategy.py`
+- `services/backend/src/strategies/structure/`
 - `services/backend/src/trade_engine.py`
-- `services/backend/src/live_adaptive_trader.py`
-- `services/backend/src/binance_executor.py`
-- `services/backend/src/binance_futures_rest.py`
-- `services/backend/src/ml_pipeline.py`
-- `services/backend/src/config.py`
+- `services/backend/src/live_trader/`
+- `services/backend/src/binance/`
+- `services/backend/src/ml/`
+- `services/backend/src/config/`
 
 ## Invariants
 
@@ -127,7 +124,7 @@ pnpm frontend:dev
 ### Full stack
 
 ```bash
-./start.sh --skip-optimize
+./start.sh
 ```
 
 ## Notes For Agents

@@ -16,8 +16,6 @@ Service-oriented crypto trading workspace with a Python backend, a React/Vite fr
 │   │   ├── config.json
 │   │   ├── requirements.txt
 │   │   ├── run_live_adaptive.py
-│   │   ├── run_ml_walkforward.py
-│   │   ├── run_retune_thresholds.py
 │   │   ├── src/
 │   │   └── tests/
 │   └── frontend/
@@ -44,13 +42,12 @@ Service-oriented crypto trading workspace with a Python backend, a React/Vite fr
 
 ```bash
 pnpm install
-./start.sh --skip-optimize
+./start.sh
 ```
 
 Useful flags:
 
 ```bash
-./start.sh --skip-optimize
 ./start.sh --no-frontend
 ./start.sh --no-browser
 ./start.sh --restart
@@ -100,20 +97,17 @@ python -m py_compile run_live_adaptive.py src/strategy.py src/live_adaptive_trad
 
 Core backend modules:
 
-- `services/backend/src/strategy.py`
-- `services/backend/src/live_adaptive_trader.py`
+- `services/backend/src/strategies/structure/*`
+- `services/backend/src/live_trader/*`
 - `services/backend/src/trade_engine.py`
-- `services/backend/src/models.py`
-- `services/backend/src/binance_futures_rest.py`
-- `services/backend/src/binance_executor.py`
-- `services/backend/src/ml_pipeline.py`
-- `services/backend/src/config.py`
+- `services/backend/src/models/*`
+- `services/backend/src/binance/*`
+- `services/backend/src/ml/*`
+- `services/backend/src/config/*`
 
 Primary backend scripts:
 
 - `services/backend/run_live_adaptive.py`
-- `services/backend/run_ml_walkforward.py`
-- `services/backend/run_retune_thresholds.py`
 
 ## Frontend Overview
 

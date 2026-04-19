@@ -168,10 +168,6 @@ ensure_python_env() {
 
   log "Validating run scripts"
   bash -n "$REPO_DIR/start.sh"
-  bash -n "$APP_DIR/run_all.sh"
-  if [ -f "$APP_DIR/fetch_live_cache.sh" ]; then
-    bash -n "$APP_DIR/fetch_live_cache.sh"
-  fi
 }
 
 write_runtime_wrapper() {
